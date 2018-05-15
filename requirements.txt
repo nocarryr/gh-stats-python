@@ -2,3 +2,4 @@ aiohttp
 pytz
 PyYAML
 json-object-factory
+motor
