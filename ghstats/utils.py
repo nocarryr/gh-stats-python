@@ -21,6 +21,9 @@ def timestamp_to_dt(ts):
     dt = EPOCH + td
     return dt
 
+def make_aware(dt, tz=UTC):
+    return tz.localize(dt)
+
 def parse_dt(s):
     dt = datetime.datetime.strptime(s, DT_FMT)
     dt = UTC.localize(dt)

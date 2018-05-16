@@ -17,6 +17,11 @@ async def store_data(all_repos):
     db_store = DbStore()
     await all_repos.store_to_db(db_store)
 
+async def from_db(**kwargs):
+    db_store = DbStore()
+    all_repos = await AllRepos.from_db(db_store, **kwargs)
+    return all_repos
+
 def main():
     loop = asyncio.get_event_loop()
     rh = RequestHandler.from_conf()

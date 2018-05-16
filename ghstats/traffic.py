@@ -1,6 +1,7 @@
 import datetime
 import asyncio
 import jsonfactory
+import pymongo
 from ghstats import utils
 
 class ApiObject(object):
@@ -55,6 +56,19 @@ class AllRepos(ApiObject):
         for repo in self.repos.values():
             tasks.append(asyncio.ensure_future(repo.store_to_db(db_store)))
         await asyncio.wait(tasks)
+    @classmethod
+    async def from_db(cls, db_store, **kwargs):
+        coll_name = 'repos'
+        coll = db_store.get_collection(coll_name)
+        obj = cls(**kwargs)
+        async for doc in coll.find():
+            rkwargs = {'request_handler':obj.request_handler}
+            rkwargs.update(kwargs)
+            rkwargs.update(doc)
+            repo = await Repo.from_db(db_store, **rkwargs)
+            obj.repos[repo.api_path] = repo
+        return obj
+
 
 class Repo(ApiObject):
     _serialize_attrs = ['owner', 'name', 'traffic_views', 'traffic_paths']
@@ -62,13 +76,22 @@ class Repo(ApiObject):
         super().__init__(**kwargs)
         self.owner = kwargs.get('owner')
         self.name = kwargs.get('name')
-        self.traffic_views = {}
-        self.traffic_paths = {}
+        self.traffic_views = None
+        self.traffic_paths = None
     @property
     def repo_slug(self):
         return '{self.owner}/{self.name}'.format(self=self)
     def _get_api_path(self):
         return 'repos/{self.owner}/{self.name}'.format(self=self)
+    def _serialize(self, attrs=None):
+        d = super()._serialize(attrs)
+        tv = d.get('traffic_views')
+        if isinstance(tv, dict):
+            utils.clean_dict_dt_keys(tv)
+        tp = d.get('traffic_paths')
+        if isinstance(tp, dict):
+            utils.clean_dict_dt_keys(tp)
+        return d
     async def get_data(self, now=None):
         if now is None:
             now = utils.now()
@@ -107,19 +130,36 @@ class Repo(ApiObject):
             asyncio.ensure_future(self.traffic_paths.store_to_db(db_store)),
         ]
         await asyncio.wait(tasks)
+    @classmethod
+    async def from_db(cls, db_store, **kwargs):
+        obj = cls(**kwargs)
+        kwargs['repo'] = obj
+        obj.traffic_views = await RepoTrafficViews.from_db(db_store, **kwargs)
+        obj.traffic_paths = await RepoTrafficPaths.from_db(db_store, **kwargs)
+        return obj
 
 
 class RepoTrafficViews(ApiObject):
     _serialize_attrs = ['total_views', 'total_uniques', 'timeline', 'datetime']
     def __init__(self, **kwargs):
+        self._repo_slug = kwargs.get('repo_slug')
         self.repo = kwargs.get('repo')
         self.per = kwargs.get('per')
         kwargs['request_handler'] = self.repo.request_handler
         super().__init__(**kwargs)
-        self.total_views = None
-        self.total_uniques = None
+        self.total_views = kwargs.get('total_views')
+        self.total_uniques = kwargs.get('total_uniques')
         self.timeline = []
         self.datetime = kwargs.get('datetime')
+    @property
+    def repo_slug(self):
+        s = self._repo_slug
+        if s is None:
+            s = self._repo_slug = self.repo.repo_slug
+        return s
+    @repo_slug.setter
+    def repo_slug(self, value):
+        self._repo_slug = value
     def _get_api_path(self):
         return '{self.repo.api_path}/traffic/views'.format(self=self)
     async def get_data(self):
@@ -161,16 +201,62 @@ class RepoTrafficViews(ApiObject):
             tasks.append(task)
         if len(tasks):
             await asyncio.wait(tasks)
+    @classmethod
+    async def from_db(cls, db_store, **kwargs):
+        coll_name = 'traffic_view_counts'
+        tl_coll_name = 'traffic_view_timeline'
+        repo = kwargs.get('repo')
+        repo_slug = kwargs.get('repo_slug')
+        if repo_slug is None:
+            repo_slug = repo.repo_slug
+        start_dt = kwargs.get('start_datetime')
+        end_dt = kwargs.get('end_datetime', utils.now())
+
+        if start_dt is None:
+            filt = {'datetime':{'$lte':end_dt}}
+        else:
+            filt = {'$and':[
+                {'datetime':{'$gte':start_dt}},
+                {'datetime':{'$lte':end_dt}},
+            ]}
+        filt['repo_slug'] = repo_slug
+
+        coll = db_store.get_collection(coll_name)
+        tl_coll = db_store.get_collection(tl_coll_name)
+        tl_keys = ['count', 'timestamp', 'uniques']
+        results = {}
+        async for doc in coll.find(filt):
+            okwargs = kwargs.copy()
+            okwargs.update(doc)
+            okwargs['datetime'] = utils.make_aware(okwargs['datetime'])
+            obj = cls(**okwargs)
+            tl_filt = {'datetime':obj.datetime, 'repo_slug':repo_slug}
+            async for tl_doc in tl_coll.find(tl_filt, sort=[('timestamp', pymongo.ASCENDING)]):
+                tl_doc = {k:v for k,v in tl_doc.items() if k in tl_keys}
+                tl_doc['timestamp'] = utils.make_aware(tl_doc['timestamp'])
+                obj.timeline.append(tl_doc)
+            results[obj.datetime] = obj
+        return results
 
 
 class RepoTrafficPaths(ApiObject):
     _serialize_attrs = ['data', 'datetime']
     def __init__(self, **kwargs):
+        self._repo_slug = kwargs.get('repo_slug')
         self.repo = kwargs.get('repo')
         kwargs['request_handler'] = self.repo.request_handler
         super().__init__(**kwargs)
         self.datetime = kwargs.get('datetime')
         self.data = []
+    @property
+    def repo_slug(self):
+        s = self._repo_slug
+        if s is None:
+            s = self._repo_slug = self.repo.repo_slug
+        return s
+    @repo_slug.setter
+    def repo_slug(self, value):
+        self._repo_slug = value
     def _get_api_path(self):
         return '{self.repo.api_path}/traffic/popular/paths'.format(self=self)
     async def get_data(self):
@@ -198,6 +284,40 @@ class RepoTrafficPaths(ApiObject):
             tasks.append(task)
         if len(tasks):
             await asyncio.wait(tasks)
+    @classmethod
+    async def from_db(cls, db_store, **kwargs):
+        coll_name = 'traffic_view_paths'
+        repo = kwargs.get('repo')
+        repo_slug = kwargs.get('repo_slug')
+        if repo_slug is None:
+            repo_slug = repo.repo_slug
+        start_dt = kwargs.get('start_datetime')
+        end_dt = kwargs.get('end_datetime', utils.now())
+
+        if start_dt is None:
+            filt = {'datetime':{'$lte':end_dt}}
+        else:
+            filt = {'$and':[
+                {'datetime':{'$gte':start_dt}},
+                {'datetime':{'$lte':end_dt}},
+            ]}
+        filt['repo_slug'] = repo_slug
+
+        coll = db_store.get_collection(coll_name)
+        results = {}
+        keys = await coll.distinct('datetime', filt)
+        data_keys = ['path', 'count', 'uniques', 'title']
+        for key in keys:
+            key = utils.make_aware(key)
+            okwargs = kwargs.copy()
+            okwargs['datetime'] = key
+            obj = cls(**okwargs)
+            obj_filt = {'datetime':key, 'repo_slug':repo_slug}
+            async for doc in coll.find(filt):
+                d = {k:doc[k] for k in data_keys}
+                obj.data.append(d)
+            results[key] = obj
+        return results
 
 
 @jsonfactory.encoder
