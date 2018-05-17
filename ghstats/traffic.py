@@ -202,9 +202,7 @@ class RepoTrafficViews(ApiObject):
         if len(tasks):
             await asyncio.wait(tasks)
     @classmethod
-    async def from_db(cls, db_store, **kwargs):
-        coll_name = 'traffic_view_counts'
-        tl_coll_name = 'traffic_view_timeline'
+    def get_db_lookup_filter(cls, **kwargs):
         repo = kwargs.get('repo')
         repo_slug = kwargs.get('repo_slug')
         if repo_slug is None:
@@ -220,6 +218,13 @@ class RepoTrafficViews(ApiObject):
                 {'datetime':{'$lte':end_dt}},
             ]}
         filt['repo_slug'] = repo_slug
+        return filt
+    @classmethod
+    async def from_db(cls, db_store, **kwargs):
+        coll_name = 'traffic_view_counts'
+        tl_coll_name = 'traffic_view_timeline'
+        filt = cls.get_db_lookup_filter(**kwargs)
+        repo_slug = filt['repo_slug']
 
         coll = db_store.get_collection(coll_name)
         tl_coll = db_store.get_collection(tl_coll_name)
@@ -285,8 +290,7 @@ class RepoTrafficPaths(ApiObject):
         if len(tasks):
             await asyncio.wait(tasks)
     @classmethod
-    async def from_db(cls, db_store, **kwargs):
-        coll_name = 'traffic_view_paths'
+    def get_db_lookup_filter(cls, **kwargs):
         repo = kwargs.get('repo')
         repo_slug = kwargs.get('repo_slug')
         if repo_slug is None:
@@ -302,6 +306,12 @@ class RepoTrafficPaths(ApiObject):
                 {'datetime':{'$lte':end_dt}},
             ]}
         filt['repo_slug'] = repo_slug
+        return filt
+    @classmethod
+    async def from_db(cls, db_store, **kwargs):
+        coll_name = 'traffic_view_paths'
+        filt = cls.get_db_lookup_filter(**kwargs)
+        repo_slug = filt['repo_slug']
 
         coll = db_store.get_collection(coll_name)
         results = {}
