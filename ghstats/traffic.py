@@ -222,27 +222,27 @@ class RepoTrafficViews(ApiObject):
     @classmethod
     async def from_db(cls, db_store, **kwargs):
         coll_name = 'traffic_view_counts'
-        tl_coll_name = 'traffic_view_timeline'
         filt = cls.get_db_lookup_filter(**kwargs)
         repo_slug = filt['repo_slug']
-
         coll = db_store.get_collection(coll_name)
-        tl_coll = db_store.get_collection(tl_coll_name)
-        tl_keys = ['count', 'timestamp', 'uniques']
         results = {}
         async for doc in coll.find(filt):
             okwargs = kwargs.copy()
             okwargs.update(doc)
             okwargs['datetime'] = utils.make_aware(okwargs['datetime'])
             obj = cls(**okwargs)
-            tl_filt = {'datetime':obj.datetime, 'repo_slug':repo_slug}
-            async for tl_doc in tl_coll.find(tl_filt, sort=[('timestamp', pymongo.ASCENDING)]):
-                tl_doc = {k:v for k,v in tl_doc.items() if k in tl_keys}
-                tl_doc['timestamp'] = utils.make_aware(tl_doc['timestamp'])
-                obj.timeline.append(tl_doc)
+            await obj.get_timeline_from_db(db_store)
             results[obj.datetime] = obj
         return results
-
+    async def get_timeline_from_db(self, db_store):
+        tl_coll_name = 'traffic_view_timeline'
+        tl_coll = db_store.get_collection(tl_coll_name)
+        tl_keys = ['count', 'timestamp', 'uniques']
+        tl_filt = {'datetime':self.datetime, 'repo_slug':self.repo_slug}
+        async for tl_doc in tl_coll.find(tl_filt, sort=[('timestamp', pymongo.ASCENDING)]):
+            tl_doc = {k:v for k,v in tl_doc.items() if k in tl_keys}
+            tl_doc['timestamp'] = utils.make_aware(tl_doc['timestamp'])
+            self.timeline.append(tl_doc)
 
 class RepoTrafficPaths(ApiObject):
     _serialize_attrs = ['data', 'datetime']
@@ -316,18 +316,22 @@ class RepoTrafficPaths(ApiObject):
         coll = db_store.get_collection(coll_name)
         results = {}
         keys = await coll.distinct('datetime', filt)
-        data_keys = ['path', 'count', 'uniques', 'title']
         for key in keys:
             key = utils.make_aware(key)
             okwargs = kwargs.copy()
             okwargs['datetime'] = key
             obj = cls(**okwargs)
-            obj_filt = {'datetime':key, 'repo_slug':repo_slug}
-            async for doc in coll.find(filt):
-                d = {k:doc[k] for k in data_keys}
-                obj.data.append(d)
+            await obj.get_data_from_db(db_store)
             results[key] = obj
         return results
+    async def get_data_from_db(self, db_store):
+        coll_name = 'traffic_view_paths'
+        coll = db_store.get_collection(coll_name)
+        data_keys = ['path', 'count', 'uniques', 'title']
+        obj_filt = {'datetime':self.datetime, 'repo_slug':self.repo_slug}
+        async for doc in coll.find(obj_filt):
+            d = {k:doc[k] for k in data_keys}
+            self.data.append(d)
 
 
 @jsonfactory.encoder
