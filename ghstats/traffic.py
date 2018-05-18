@@ -166,7 +166,10 @@ class RepoTrafficViews(ApiObject):
         resp_data = await self.make_request('get', data={'per':self.per})
         self.total_views = resp_data['count']
         self.total_uniques = resp_data['uniques']
-        self.timeline = resp_data['views']
+        for tldata in resp_data['views']:
+            tldata['traffic_view'] = self
+            entry = TrafficTimelineEntry(**tldata)
+            self.timeline.append(entry)
     def get_db_filter(self):
         td = datetime.timedelta(hours=1)
         dt_range = [self.datetime - td, self.datetime + td]
@@ -187,17 +190,9 @@ class RepoTrafficViews(ApiObject):
         await db_store.add_doc_if_missing(coll_name, filt, doc)
         await self.store_timeline_to_db(db_store)
     async def store_timeline_to_db(self, db_store):
-        coll_name = 'traffic_view_timeline'
-        filt = {'repo_slug':self.repo.repo_slug}
         tasks = []
-        for tldata in self.timeline:
-            doc = {
-                'datetime':tldata['timestamp'],
-                'repo_slug':self.repo.repo_slug,
-            }
-            doc.update({k:v for k,v in tldata.items() if k != 'timestamp'})
-            filt['datetime'] = doc['datetime']
-            task = asyncio.ensure_future(db_store.add_doc_if_missing(coll_name, filt, doc))
+        for entry in self.timeline:
+            task = asyncio.ensure_future(entry.store_to_db(db_store))
             tasks.append(task)
         if len(tasks):
             await asyncio.wait(tasks)
@@ -235,14 +230,51 @@ class RepoTrafficViews(ApiObject):
             results[obj.datetime] = obj
         return results
     async def get_timeline_from_db(self, db_store):
+        self.timeline = await TrafficTimelineEntry.from_db(db_store, traffic_view=self)
+
+class TrafficTimelineEntry(ApiObject):
+    _serialize_attrs = ['count', 'uniques', 'timestamp']
+    def __init__(self, **kwargs):
+        self.traffic_view = kwargs.get('traffic_view')
+        super().__init__(**kwargs)
+        self.count = kwargs.get('count')
+        self.uniques = kwargs.get('uniques')
+        self.timestamp = kwargs.get('timestamp')
+    @property
+    def repo_slug(self):
+        return self.traffic_view.repo_slug
+    def _get_api_path(self):
+        return self.traffic_view.api_path
+    async def store_to_db(self, db_store):
+        coll_name = 'traffic_view_timeline'
+        doc = {
+            'repo_slug':self.repo_slug,
+            'count':self.count,
+            'uniques':self.uniques,
+            'timestamp':self.timestamp,
+            'datetime':self.traffic_view.datetime,
+        }
+        filt = {'datetime':self.traffic_view.datetime, 'repo_slug':self.repo_slug}
+        await db_store.add_doc_if_missing(coll_name, filt, doc)
+    @classmethod
+    async def from_db(cls, db_store, **kwargs):
+        traffic_view = kwargs.get('traffic_view')
         tl_coll_name = 'traffic_view_timeline'
         tl_coll = db_store.get_collection(tl_coll_name)
         tl_keys = ['count', 'timestamp', 'uniques']
-        tl_filt = {'datetime':self.datetime, 'repo_slug':self.repo_slug}
+        tl_filt = {
+            'datetime':traffic_view.datetime,
+            'repo_slug':traffic_view.repo_slug,
+        }
+        results = []
         async for tl_doc in tl_coll.find(tl_filt, sort=[('timestamp', pymongo.ASCENDING)]):
-            tl_doc = {k:v for k,v in tl_doc.items() if k in tl_keys}
             tl_doc['timestamp'] = utils.make_aware(tl_doc['timestamp'])
-            self.timeline.append(tl_doc)
+            tlkwargs = {'traffic_view':traffic_view}
+            tlkwargs.update(tl_doc)
+            results.append(cls(**tlkwargs))
+        return results
+    def __str__(self):
+        return '{self.timestamp} - {self.count}'.format(self=self)
 
 class RepoTrafficPaths(ApiObject):
     _serialize_attrs = ['data', 'datetime']
@@ -266,7 +298,9 @@ class RepoTrafficPaths(ApiObject):
         return '{self.repo.api_path}/traffic/popular/paths'.format(self=self)
     async def get_data(self):
         resp_data = await self.make_request('get')
-        self.data = resp_data
+        for d in resp_data:
+            d['traffic_path'] = self
+            self.data.append(TrafficPathEntry(**d))
     def get_db_filter(self):
         td = datetime.timedelta(days=14)
         dt_range = [self.datetime - td, self.datetime]
@@ -279,13 +313,9 @@ class RepoTrafficPaths(ApiObject):
         }
         return filt
     async def store_to_db(self, db_store):
-        coll_name = 'traffic_view_paths'
-        filt = self.get_db_filter()
         tasks = []
-        for d in self.data:
-            doc = {'repo_slug':self.repo.repo_slug, 'datetime':self.datetime}
-            doc.update(d)
-            task = asyncio.ensure_future(db_store.update_doc(coll_name, filt, doc))
+        for entry in self.data:
+            task = asyncio.ensure_future(entry.store_to_db(db_store))
             tasks.append(task)
         if len(tasks):
             await asyncio.wait(tasks)
@@ -325,14 +355,45 @@ class RepoTrafficPaths(ApiObject):
             results[key] = obj
         return results
     async def get_data_from_db(self, db_store):
+        self.data = await TrafficPathEntry.from_db(db_store, traffic_path=self)
+
+class TrafficPathEntry(ApiObject):
+    _serialize_attrs = ['path', 'count', 'uniques', 'title']
+    def __init__(self, **kwargs):
+        self.traffic_path = kwargs.get('traffic_path')
+        super().__init__(**kwargs)
+        self.path = kwargs.get('path')
+        self.count = kwargs.get('count')
+        self.uniques = kwargs.get('uniques')
+        self.title = kwargs.get('title')
+    @property
+    def repo_slug(self):
+        return self.traffic_path.repo_slug
+    def _get_api_path(self):
+        return self.traffic_path.api_path
+    async def store_to_db(self, db_store):
+        coll_name = 'traffic_view_paths'
+        filt = self.traffic_path.get_db_filter()
+        doc = {'repo_slug':self.repo_slug, 'datetime':self.traffic_path.datetime}
+        doc.update(self._serialize())
+        await db_store.update_doc(coll_name, filt, doc)
+    @classmethod
+    async def from_db(cls, db_store, **kwargs):
+        traffic_path = kwargs.get('traffic_path')
         coll_name = 'traffic_view_paths'
         coll = db_store.get_collection(coll_name)
-        data_keys = ['path', 'count', 'uniques', 'title']
-        obj_filt = {'datetime':self.datetime, 'repo_slug':self.repo_slug}
+        obj_filt = {
+            'datetime':traffic_path.datetime,
+            'repo_slug':traffic_path.repo_slug,
+        }
+        results = []
         async for doc in coll.find(obj_filt):
-            d = {k:doc[k] for k in data_keys}
-            self.data.append(d)
-
+            ekwargs = {'traffic_path':traffic_path}
+            ekwargs.update(doc)
+            results.append(cls(**ekwargs))
+        return results
+    def __str__(self):
+        return self.path
 
 @jsonfactory.encoder
 def json_encode(o):
