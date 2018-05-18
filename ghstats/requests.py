@@ -62,23 +62,56 @@ class RequestHandler(object):
                 rel = rel.strip(' ').split('=')[1].strip('"')
                 d[rel] = u
         return d
-    async def _do_request(self, verb, url, data=None):
+    def parse_debug_headers(self, headers):
+        def parse_conditional_headers():
+            keys = ['ETag', 'Last-Modified']
+            return {k:headers.get(k) for k in keys}
+        def parse_rate_headers():
+            total_limit = headers.get('X-RateLimit-Limit')
+            remaining = headers.get('X-RateLimit-Remaining')
+            reset_timestamp = headers.get('X-RateLimit-Reset')
+            if total_limit is not None and remaining is not None:
+                total_limit = int(total_limit)
+                remaining = int(remaining)
+                used = total_limit - remaining
+            else:
+                used = None
+            if reset_timestamp is not None:
+                reset_timestamp = utils.timestamp_to_dt(float(reset_timestamp))
+            d = {
+                'total_limit':total_limit,
+                'remaining':remaining,
+                'reset_timestamp':reset_timestamp
+            }
+            return d
+        d = {
+            'ApiLimits':parse_rate_headers(),
+            'Conditional':parse_conditional_headers(),
+        }
+        return d
+    async def _do_request(self, verb, url, data=None, request_headers=None):
         req_kwargs = {}
         if data:
             req_kwargs['data'] = data
+        if request_headers is not None:
+            req_kwargs['headers'] = request_headers
         async with self as session:
             verb_func = getattr(session, verb)
             async with verb_func(url, **req_kwargs) as resp:
                 status_code = resp.status
                 headers = resp.headers
-                resp_data = await resp.json()
-        logger.debug('headers: {}'.format(headers))
+                if status_code == 200:
+                    resp_data = await resp.json()
+                else:
+                    resp_data = await resp.text()
+        header_data = self.parse_debug_headers(headers)
+        logger.debug('headers: {}'.format(header_data))
         pagination_links = self.parse_link_headers(headers)
         if 'next' in pagination_links:
-            status_code, _resp_data = await self._do_request(verb, pagination_links['next'], data)
+            status_code, _header_data, _resp_data = await self._do_request(verb, pagination_links['next'], data)
             resp_data.extend(_resp_data)
-        return status_code, resp_data
-    async def make_request(self, verb, path, data=None):
+        return status_code, header_data, resp_data
+    async def make_request(self, verb, path, data=None, headers=None):
         if data is None:
             data = {}
         # if self.token is not None:
@@ -90,17 +123,17 @@ class RequestHandler(object):
 
         url = '/'.join([API_ENDPOINT, path])
 
-        status_code, resp_data = await self._do_request(verb, url, data)
+        status_code, header_data, resp_data = await self._do_request(verb, url, data, headers)
 
-        logger.debug('make_request: verb={}, path={}, url={}, status_code={}'.format(
-            verb, path, url, status_code,
-        ))
-        # log_request(verb, url, resp_data)
-        if status_code != 200:
+        if status_code == 304:      # Not Modified
+            logger.debug('request not modified: verb={}, url={}'.format(verb, url))
+            resp_data = {}
+        elif status_code != 200:
             raise Exception('status_code: {}, response: {}'.format(status_code, resp_data))
-        resp_data = utils.iter_parse_datetimes(resp_data)
+        else:
+            resp_data = utils.iter_parse_datetimes(resp_data)
 
-        return resp_data
+        return status_code, header_data, resp_data
     async def get(self, path, data=None):
         return await self.make_request('get', path, data)
     async def post(self, path, data=None):

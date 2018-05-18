@@ -7,6 +7,7 @@ from ghstats import utils
 class ApiObject(object):
     _serialize_attrs = []
     def __init__(self, **kwargs):
+        self._modified = kwargs.get('_modified', True)
         self.request_handler = kwargs.get('request_handler')
         self.db_store = kwargs.get('db_store')
     @property
@@ -17,8 +18,39 @@ class ApiObject(object):
     async def make_request(self, verb, api_path=None, data=None):
         if api_path is None:
             api_path = self.api_path
-        resp = await self.request_handler.make_request(verb, api_path, data)
-        return resp
+        cache = await self.get_etag_from_db(verb, api_path)
+        if cache is not None:
+            headers = {'If-None-Match':cache['etag']}
+        else:
+            headers = None
+        rh = self.request_handler
+        status_code, header_data, resp_data = await rh.make_request(
+            verb, api_path, data, headers
+        )
+        if status_code == 304:
+            resp_data = cache['response_data']
+            self._modified = False
+        else:
+            await self.update_etag_to_db(verb, api_path, resp_data, header_data)
+        return resp_data
+    async def get_etag_from_db(self, verb, api_path):
+        if self.db_store is None:
+            return None
+        coll_name = 'request_etags'
+        filt = {'verb':verb, 'api_path':api_path}
+        return await self.db_store.get_doc(coll_name, filt)
+    async def update_etag_to_db(self, verb, api_path, resp_data, header_data):
+        if self.db_store is None:
+            return
+        coll_name = 'request_etags'
+        etag = header_data.get('Conditional', {}).get('ETag')
+        if etag is None:
+            return
+        filt = {'verb':verb, 'api_path':api_path}
+        doc = {'etag':etag}
+        doc.update(filt)
+        doc['response_data'] = resp_data
+        await self.db_store.update_doc(coll_name, filt, doc)
     def _serialize(self, attrs=None):
         if attrs is None:
             attrs = self._serialize_attrs
@@ -133,7 +165,8 @@ class Repo(ApiObject):
         attrs = [a for a in self._serialize_attrs if a not in ['traffic_views', 'traffic_paths']]
         doc = self._serialize(attrs)
         doc['repo_slug'] = self.repo_slug
-        result = await db_store.update_doc(coll_name, filt, doc)
+        if self._modified:
+            result = await db_store.update_doc(coll_name, filt, doc)
         tasks = [
             asyncio.ensure_future(self.traffic_views.store_to_db()),
             asyncio.ensure_future(self.traffic_paths.store_to_db()),
@@ -198,8 +231,9 @@ class RepoTrafficViews(ApiObject):
         attrs = [a for a in self._serialize_attrs if a not in 'timeline']
         doc = self._serialize(attrs)
         doc['repo_slug'] = self.repo.repo_slug
-        await db_store.add_doc_if_missing(coll_name, filt, doc)
-        await self.store_timeline_to_db(db_store)
+        if self._modified:
+            await db_store.add_doc_if_missing(coll_name, filt, doc)
+            await self.store_timeline_to_db(db_store)
     async def store_timeline_to_db(self, db_store):
         tasks = []
         for entry in self.timeline:
@@ -248,6 +282,7 @@ class TrafficTimelineEntry(ApiObject):
     _serialize_attrs = ['count', 'uniques', 'timestamp']
     def __init__(self, **kwargs):
         self.traffic_view = kwargs.get('traffic_view')
+        kwargs.setdefault('_modified', self.traffic_view._modified)
         super().__init__(**kwargs)
         self.count = kwargs.get('count')
         self.uniques = kwargs.get('uniques')
@@ -268,7 +303,8 @@ class TrafficTimelineEntry(ApiObject):
             'datetime':self.traffic_view.datetime,
         }
         filt = {'datetime':self.traffic_view.datetime, 'repo_slug':self.repo_slug}
-        await db_store.add_doc_if_missing(coll_name, filt, doc)
+        if self._modified:
+            await db_store.add_doc_if_missing(coll_name, filt, doc)
     @classmethod
     async def from_db(cls, db_store, **kwargs):
         traffic_view = kwargs.get('traffic_view')
@@ -375,6 +411,7 @@ class TrafficPathEntry(ApiObject):
     _serialize_attrs = ['path', 'count', 'uniques', 'title']
     def __init__(self, **kwargs):
         self.traffic_path = kwargs.get('traffic_path')
+        kwargs.setdefault('_modified', self.traffic_path._modified)
         super().__init__(**kwargs)
         self.path = kwargs.get('path')
         self.count = kwargs.get('count')
@@ -391,7 +428,8 @@ class TrafficPathEntry(ApiObject):
         filt = self.traffic_path.get_db_filter()
         doc = {'repo_slug':self.repo_slug, 'datetime':self.traffic_path.datetime}
         doc.update(self._serialize())
-        await db_store.update_doc(coll_name, filt, doc)
+        if self._modified:
+            await db_store.update_doc(coll_name, filt, doc)
     @classmethod
     async def from_db(cls, db_store, **kwargs):
         traffic_path = kwargs.get('traffic_path')
