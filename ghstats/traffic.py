@@ -98,6 +98,7 @@ class AllRepos(ApiObject):
         coll_name = 'repos'
         coll = db_store.get_collection(coll_name)
         kwargs['db_store'] = db_store
+        kwargs['_modified'] = False
         obj = cls(**kwargs)
         async for doc in coll.find():
             rkwargs = {'request_handler':obj.request_handler}
@@ -175,6 +176,7 @@ class Repo(ApiObject):
     @classmethod
     async def from_db(cls, db_store, **kwargs):
         kwargs['db_store'] = db_store
+        kwargs['_modified'] = False
         obj = cls(**kwargs)
         kwargs['repo'] = obj
         obj.traffic_views = await RepoTrafficViews.from_db(db_store, **kwargs)
@@ -267,6 +269,7 @@ class RepoTrafficViews(ApiObject):
         coll = db_store.get_collection(coll_name)
         results = {}
         kwargs['db_store'] = db_store
+        kwargs['_modified'] = False
         async for doc in coll.find(filt):
             okwargs = kwargs.copy()
             okwargs.update(doc)
@@ -318,7 +321,11 @@ class TrafficTimelineEntry(ApiObject):
         results = []
         async for tl_doc in tl_coll.find(tl_filt, sort=[('timestamp', pymongo.ASCENDING)]):
             tl_doc['timestamp'] = utils.make_aware(tl_doc['timestamp'])
-            tlkwargs = {'traffic_view':traffic_view, 'db_store':db_store}
+            tlkwargs = {
+                'traffic_view':traffic_view,
+                'db_store':db_store,
+                '_modified':False,
+            }
             tlkwargs.update(tl_doc)
             results.append(cls(**tlkwargs))
         return results
@@ -393,6 +400,7 @@ class RepoTrafficPaths(ApiObject):
         filt = cls.get_db_lookup_filter(**kwargs)
         repo_slug = filt['repo_slug']
         kwargs['db_store'] = db_store
+        kwargs['_modified'] = False
         coll = db_store.get_collection(coll_name)
         results = {}
         keys = await coll.distinct('datetime', filt)
@@ -441,7 +449,11 @@ class TrafficPathEntry(ApiObject):
         }
         results = []
         async for doc in coll.find(obj_filt):
-            ekwargs = {'traffic_path':traffic_path, 'db_store':db_store}
+            ekwargs = {
+                'traffic_path':traffic_path,
+                'db_store':db_store,
+                '_modified':False,
+            }
             ekwargs.update(doc)
             results.append(cls(**ekwargs))
         return results
