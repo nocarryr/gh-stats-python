@@ -7,8 +7,8 @@ from ghstats.traffic import AllRepos, Repo
 from ghstats.dbstore import DbStore
 
 
-async def get_data(request_handler):
-    all_repos = AllRepos(request_handler=request_handler)
+async def get_data(**kwargs):
+    all_repos = AllRepos(**kwargs)
     await all_repos.get_repos()
     await all_repos.get_repo_data()
     return all_repos
@@ -25,6 +25,8 @@ async def from_db(**kwargs):
 def main():
     loop = asyncio.get_event_loop()
     rh = RequestHandler.from_conf()
-    all_repos = loop.run_until_complete(get_data(rh))
-    loop.run_until_complete(store_data(all_repos))
+    db_store = DbStore()
+    all_repos = loop.run_until_complete(
+        get_data(request_handler=rh, db_store=db_store)
+    )
     return all_repos

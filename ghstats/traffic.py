@@ -8,6 +8,7 @@ class ApiObject(object):
     _serialize_attrs = []
     def __init__(self, **kwargs):
         self.request_handler = kwargs.get('request_handler')
+        self.db_store = kwargs.get('db_store')
     @property
     def api_path(self):
         return self._get_api_path()
@@ -41,6 +42,7 @@ class AllRepos(ApiObject):
                 owner=repo_data['owner']['login'],
                 name=repo_data['name'],
                 request_handler=self.request_handler,
+                db_store=self.db_store,
             )
             self.repos[repo.api_path] = repo
         return self.repos
@@ -51,15 +53,19 @@ class AllRepos(ApiObject):
         for repo in self.repos.values():
             tasks.append(asyncio.ensure_future(repo.get_data(now=now)))
         await asyncio.wait(tasks)
-    async def store_to_db(self, db_store):
+        if self.db_store is not None:
+            await self.store_to_db()
+    async def store_to_db(self):
+        db_store = self.db_store
         tasks = []
         for repo in self.repos.values():
-            tasks.append(asyncio.ensure_future(repo.store_to_db(db_store)))
+            tasks.append(asyncio.ensure_future(repo.store_to_db()))
         await asyncio.wait(tasks)
     @classmethod
     async def from_db(cls, db_store, **kwargs):
         coll_name = 'repos'
         coll = db_store.get_collection(coll_name)
+        kwargs['db_store'] = db_store
         obj = cls(**kwargs)
         async for doc in coll.find():
             rkwargs = {'request_handler':obj.request_handler}
@@ -105,7 +111,9 @@ class Repo(ApiObject):
             now = utils.now()
         now_ts = utils.dt_to_timestamp(now)
 
-        tv = RepoTrafficViews(repo=self, per=per, datetime=now)
+        tv = RepoTrafficViews(
+            repo=self, per=per, datetime=now, db_store=self.db_store,
+        )
         self.traffic_views = tv
         await tv.get_data()
         return tv
@@ -114,24 +122,26 @@ class Repo(ApiObject):
             now = utils.now()
         now_ts = utils.dt_to_timestamp(now)
 
-        tp = RepoTrafficPaths(repo=self, datetime=now)
+        tp = RepoTrafficPaths(repo=self, datetime=now, db_store=self.db_store)
         self.traffic_paths = tp
         await tp.get_data()
         return tp
-    async def store_to_db(self, db_store):
+    async def store_to_db(self):
         coll_name = 'repos'
+        db_store = self.db_store
         filt = {'repo_slug':self.repo_slug}
         attrs = [a for a in self._serialize_attrs if a not in ['traffic_views', 'traffic_paths']]
         doc = self._serialize(attrs)
         doc['repo_slug'] = self.repo_slug
         result = await db_store.update_doc(coll_name, filt, doc)
         tasks = [
-            asyncio.ensure_future(self.traffic_views.store_to_db(db_store)),
-            asyncio.ensure_future(self.traffic_paths.store_to_db(db_store)),
+            asyncio.ensure_future(self.traffic_views.store_to_db()),
+            asyncio.ensure_future(self.traffic_paths.store_to_db()),
         ]
         await asyncio.wait(tasks)
     @classmethod
     async def from_db(cls, db_store, **kwargs):
+        kwargs['db_store'] = db_store
         obj = cls(**kwargs)
         kwargs['repo'] = obj
         obj.traffic_views = await RepoTrafficViews.from_db(db_store, **kwargs)
@@ -167,7 +177,7 @@ class RepoTrafficViews(ApiObject):
         self.total_views = resp_data['count']
         self.total_uniques = resp_data['uniques']
         for tldata in resp_data['views']:
-            tldata['traffic_view'] = self
+            tldata.update({'traffic_view':self, 'db_store':self.db_store})
             entry = TrafficTimelineEntry(**tldata)
             self.timeline.append(entry)
     def get_db_filter(self):
@@ -181,8 +191,9 @@ class RepoTrafficViews(ApiObject):
             ],
         }
         return filt
-    async def store_to_db(self, db_store):
+    async def store_to_db(self):
         coll_name = 'traffic_view_counts'
+        db_store = self.db_store
         filt = self.get_db_filter()
         attrs = [a for a in self._serialize_attrs if a not in 'timeline']
         doc = self._serialize(attrs)
@@ -192,7 +203,7 @@ class RepoTrafficViews(ApiObject):
     async def store_timeline_to_db(self, db_store):
         tasks = []
         for entry in self.timeline:
-            task = asyncio.ensure_future(entry.store_to_db(db_store))
+            task = asyncio.ensure_future(entry.store_to_db())
             tasks.append(task)
         if len(tasks):
             await asyncio.wait(tasks)
@@ -221,6 +232,7 @@ class RepoTrafficViews(ApiObject):
         repo_slug = filt['repo_slug']
         coll = db_store.get_collection(coll_name)
         results = {}
+        kwargs['db_store'] = db_store
         async for doc in coll.find(filt):
             okwargs = kwargs.copy()
             okwargs.update(doc)
@@ -245,8 +257,9 @@ class TrafficTimelineEntry(ApiObject):
         return self.traffic_view.repo_slug
     def _get_api_path(self):
         return self.traffic_view.api_path
-    async def store_to_db(self, db_store):
+    async def store_to_db(self):
         coll_name = 'traffic_view_timeline'
+        db_store = self.db_store
         doc = {
             'repo_slug':self.repo_slug,
             'count':self.count,
@@ -269,7 +282,7 @@ class TrafficTimelineEntry(ApiObject):
         results = []
         async for tl_doc in tl_coll.find(tl_filt, sort=[('timestamp', pymongo.ASCENDING)]):
             tl_doc['timestamp'] = utils.make_aware(tl_doc['timestamp'])
-            tlkwargs = {'traffic_view':traffic_view}
+            tlkwargs = {'traffic_view':traffic_view, 'db_store':db_store}
             tlkwargs.update(tl_doc)
             results.append(cls(**tlkwargs))
         return results
@@ -299,7 +312,7 @@ class RepoTrafficPaths(ApiObject):
     async def get_data(self):
         resp_data = await self.make_request('get')
         for d in resp_data:
-            d['traffic_path'] = self
+            d.update({'traffic_path':self, 'db_store':self.db_store})
             self.data.append(TrafficPathEntry(**d))
     def get_db_filter(self):
         td = datetime.timedelta(days=14)
@@ -312,10 +325,11 @@ class RepoTrafficPaths(ApiObject):
             ],
         }
         return filt
-    async def store_to_db(self, db_store):
+    async def store_to_db(self):
+        db_store = self.db_store
         tasks = []
         for entry in self.data:
-            task = asyncio.ensure_future(entry.store_to_db(db_store))
+            task = asyncio.ensure_future(entry.store_to_db())
             tasks.append(task)
         if len(tasks):
             await asyncio.wait(tasks)
@@ -342,7 +356,7 @@ class RepoTrafficPaths(ApiObject):
         coll_name = 'traffic_view_paths'
         filt = cls.get_db_lookup_filter(**kwargs)
         repo_slug = filt['repo_slug']
-
+        kwargs['db_store'] = db_store
         coll = db_store.get_collection(coll_name)
         results = {}
         keys = await coll.distinct('datetime', filt)
@@ -371,8 +385,9 @@ class TrafficPathEntry(ApiObject):
         return self.traffic_path.repo_slug
     def _get_api_path(self):
         return self.traffic_path.api_path
-    async def store_to_db(self, db_store):
+    async def store_to_db(self):
         coll_name = 'traffic_view_paths'
+        db_store = self.db_store
         filt = self.traffic_path.get_db_filter()
         doc = {'repo_slug':self.repo_slug, 'datetime':self.traffic_path.datetime}
         doc.update(self._serialize())
@@ -388,7 +403,7 @@ class TrafficPathEntry(ApiObject):
         }
         results = []
         async for doc in coll.find(obj_filt):
-            ekwargs = {'traffic_path':traffic_path}
+            ekwargs = {'traffic_path':traffic_path, 'db_store':db_store}
             ekwargs.update(doc)
             results.append(cls(**ekwargs))
         return results
