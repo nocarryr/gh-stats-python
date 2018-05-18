@@ -41,6 +41,7 @@ setup(
     author = "Matthew Reid",
     author_email = "matt@nomadic-recording.com",
     description = "Github Repo Stats Collector",
+    license='MIT',
     long_description=long_description,
     packages=find_packages(exclude=['tests*']),
     include_package_data=True,
@@ -49,6 +50,7 @@ setup(
     platforms=['any'],
     classifiers = [
         'Development Status :: 3 - Alpha',
+        'License :: OSI Approved :: MIT License',
         'Operating System :: OS Independent',
         'Programming Language :: Python',
         'Programming Language :: Python :: 3',
