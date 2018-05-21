@@ -62,6 +62,7 @@ class ApiObject(object):
 
 class AllRepos(ApiObject):
     _serialize_attrs = ['repos']
+    _collection_name = 'repos'
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.repos = {}
@@ -95,8 +96,7 @@ class AllRepos(ApiObject):
         await asyncio.wait(tasks)
     @classmethod
     async def from_db(cls, db_store, **kwargs):
-        coll_name = 'repos'
-        coll = db_store.get_collection(coll_name)
+        coll = db_store.get_collection(cls._collection_name)
         kwargs['db_store'] = db_store
         kwargs['_modified'] = False
         obj = cls(**kwargs)
@@ -111,6 +111,7 @@ class AllRepos(ApiObject):
 
 class Repo(ApiObject):
     _serialize_attrs = ['owner', 'name', 'traffic_views', 'traffic_paths']
+    _collection_name = 'repos'
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.owner = kwargs.get('owner')
@@ -160,7 +161,7 @@ class Repo(ApiObject):
         await tp.get_data()
         return tp
     async def store_to_db(self):
-        coll_name = 'repos'
+        coll_name = self._collection_name
         db_store = self.db_store
         filt = {'repo_slug':self.repo_slug}
         attrs = [a for a in self._serialize_attrs if a not in ['traffic_views', 'traffic_paths']]
@@ -186,6 +187,7 @@ class Repo(ApiObject):
 
 class RepoTrafficViews(ApiObject):
     _serialize_attrs = ['total_views', 'total_uniques', 'timeline', 'datetime']
+    _collection_name = 'traffic_view_counts'
     def __init__(self, **kwargs):
         self._repo_slug = kwargs.get('repo_slug')
         self.repo = kwargs.get('repo')
@@ -227,7 +229,7 @@ class RepoTrafficViews(ApiObject):
         }
         return filt
     async def store_to_db(self):
-        coll_name = 'traffic_view_counts'
+        coll_name = self._collection_name
         db_store = self.db_store
         filt = self.get_db_filter()
         attrs = [a for a in self._serialize_attrs if a not in 'timeline']
@@ -263,10 +265,9 @@ class RepoTrafficViews(ApiObject):
         return filt
     @classmethod
     async def from_db(cls, db_store, **kwargs):
-        coll_name = 'traffic_view_counts'
         filt = cls.get_db_lookup_filter(**kwargs)
         repo_slug = filt['repo_slug']
-        coll = db_store.get_collection(coll_name)
+        coll = db_store.get_collection(cls._collection_name)
         results = {}
         kwargs['db_store'] = db_store
         kwargs['_modified'] = False
@@ -283,6 +284,7 @@ class RepoTrafficViews(ApiObject):
 
 class TrafficTimelineEntry(ApiObject):
     _serialize_attrs = ['count', 'uniques', 'timestamp']
+    _collection_name = 'traffic_view_timeline'
     def __init__(self, **kwargs):
         self.traffic_view = kwargs.get('traffic_view')
         kwargs.setdefault('_modified', self.traffic_view._modified)
@@ -296,7 +298,7 @@ class TrafficTimelineEntry(ApiObject):
     def _get_api_path(self):
         return self.traffic_view.api_path
     async def store_to_db(self):
-        coll_name = 'traffic_view_timeline'
+        coll_name = self._collection_name
         db_store = self.db_store
         doc = {
             'repo_slug':self.repo_slug,
@@ -334,6 +336,7 @@ class TrafficTimelineEntry(ApiObject):
 
 class RepoTrafficPaths(ApiObject):
     _serialize_attrs = ['data', 'datetime']
+    _collection_name = 'traffic_view_paths'
     def __init__(self, **kwargs):
         self._repo_slug = kwargs.get('repo_slug')
         self.repo = kwargs.get('repo')
@@ -396,12 +399,11 @@ class RepoTrafficPaths(ApiObject):
         return filt
     @classmethod
     async def from_db(cls, db_store, **kwargs):
-        coll_name = 'traffic_view_paths'
         filt = cls.get_db_lookup_filter(**kwargs)
         repo_slug = filt['repo_slug']
         kwargs['db_store'] = db_store
         kwargs['_modified'] = False
-        coll = db_store.get_collection(coll_name)
+        coll = db_store.get_collection(cls._collection_name)
         results = {}
         keys = await coll.distinct('datetime', filt)
         for key in keys:
@@ -417,6 +419,7 @@ class RepoTrafficPaths(ApiObject):
 
 class TrafficPathEntry(ApiObject):
     _serialize_attrs = ['path', 'count', 'uniques', 'title']
+    _collection_name = 'traffic_view_paths'
     def __init__(self, **kwargs):
         self.traffic_path = kwargs.get('traffic_path')
         kwargs.setdefault('_modified', self.traffic_path._modified)
@@ -431,7 +434,7 @@ class TrafficPathEntry(ApiObject):
     def _get_api_path(self):
         return self.traffic_path.api_path
     async def store_to_db(self):
-        coll_name = 'traffic_view_paths'
+        coll_name = self._collection_name
         db_store = self.db_store
         filt = self.traffic_path.get_db_filter()
         doc = {'repo_slug':self.repo_slug, 'datetime':self.traffic_path.datetime}
@@ -441,8 +444,7 @@ class TrafficPathEntry(ApiObject):
     @classmethod
     async def from_db(cls, db_store, **kwargs):
         traffic_path = kwargs.get('traffic_path')
-        coll_name = 'traffic_view_paths'
-        coll = db_store.get_collection(coll_name)
+        coll = db_store.get_collection(cls._collection_name)
         obj_filt = {
             'datetime':traffic_path.datetime,
             'repo_slug':traffic_path.repo_slug,
