@@ -4,6 +4,20 @@ import jsonfactory
 import pymongo
 from ghstats import utils
 
+
+def build_datetime_filter(filter_key, **kwargs):
+    start_dt = kwargs.get('start_datetime')
+    end_dt = kwargs.get('end_datetime', utils.now())
+
+    if start_dt is None:
+        filt = {filter_key:{'$lte':end_dt}}
+    else:
+        filt = {'$and':[
+            {filter_key:{'$gte':start_dt}},
+            {filter_key:{'$lte':end_dt}},
+        ]}
+    return filt
+
 class ApiObject(object):
     _serialize_attrs = []
     def __init__(self, **kwargs):
@@ -251,16 +265,7 @@ class RepoTrafficViews(ApiObject):
         repo_slug = kwargs.get('repo_slug')
         if repo_slug is None:
             repo_slug = repo.repo_slug
-        start_dt = kwargs.get('start_datetime')
-        end_dt = kwargs.get('end_datetime', utils.now())
-
-        if start_dt is None:
-            filt = {'datetime':{'$lte':end_dt}}
-        else:
-            filt = {'$and':[
-                {'datetime':{'$gte':start_dt}},
-                {'datetime':{'$lte':end_dt}},
-            ]}
+        filt = build_datetime_filter('datetime', **kwargs)
         filt['repo_slug'] = repo_slug
         return filt
     @classmethod
@@ -385,16 +390,7 @@ class RepoTrafficPaths(ApiObject):
         repo_slug = kwargs.get('repo_slug')
         if repo_slug is None:
             repo_slug = repo.repo_slug
-        start_dt = kwargs.get('start_datetime')
-        end_dt = kwargs.get('end_datetime', utils.now())
-
-        if start_dt is None:
-            filt = {'datetime':{'$lte':end_dt}}
-        else:
-            filt = {'$and':[
-                {'datetime':{'$gte':start_dt}},
-                {'datetime':{'$lte':end_dt}},
-            ]}
+        filt = build_datetime_filter('datetime', **kwargs)
         filt['repo_slug'] = repo_slug
         return filt
     @classmethod
