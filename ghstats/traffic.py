@@ -137,6 +137,20 @@ class Repo(ApiObject):
         return '{self.owner}/{self.name}'.format(self=self)
     def _get_api_path(self):
         return 'repos/{self.owner}/{self.name}'.format(self=self)
+    def _cmp(self, other, op):
+        if not isinstance(other, Repo):
+            return NotImplemented
+        if self.traffic_views is None or other.traffic_views is None:
+            return NotImplemented
+        return self.traffic_views._cmp(other.traffic_views, op)
+    def __eq__(self, other):
+        return self._cmp(other, 'eq')
+    def __ne__(self, other):
+        return self._cmp(other, 'ne')
+    def __gt__(self, other):
+        return self._cmp(other, 'gt')
+    def __lt__(self, other):
+        return self._cmp(other, 'lt')
     def _serialize(self, attrs=None):
         d = super()._serialize(attrs)
         tv = d.get('traffic_views')
@@ -234,6 +248,30 @@ class RepoTrafficViews(ApiObject):
         self._repo_slug = value
     def _get_api_path(self):
         return '{self.repo.api_path}/traffic/views'.format(self=self)
+    def _cmp(self, other, op):
+        if not isinstance(other, RepoTrafficViews):
+            return NotImplemented
+        result = 0
+        if self.total_views < other.total_views:
+            result = -1
+        if self.total_views > other.total_views:
+            result = 1
+        if op == 'eq':
+            return result == 0
+        elif op == 'ne':
+            return result != 0
+        elif op == 'gt':
+            return result == 1
+        elif op == 'lt':
+            return result == -1
+    def __eq__(self, other):
+        return self._cmp(other, 'eq')
+    def __ne__(self, other):
+        return self._cmp(other, 'ne')
+    def __gt__(self, other):
+        return self._cmp(other, 'gt')
+    def __lt__(self, other):
+        return self._cmp(other, 'lt')
     async def get_data(self):
         resp_data = await self.make_request('get', data={'per':self.per})
         self.total_views = resp_data['count']
