@@ -1,4 +1,5 @@
-aiohttp
+aiohttp>=3.2.1
+aiohttp_jinja2
 pytz
 PyYAML
 json-object-factory

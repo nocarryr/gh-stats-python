@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block body %}
+<canvas id="timeline-chart"
+        class="chart"
+        data-from-url="/traffic-data/"
+        data-dt-format="{{ DT_FMT }}"
+        data-metric="{{ data_metric }}"></canvas>
+<div class="metric-select" data-chart-id="timeline-chart">
+    <button data-metric="count">Count</button>
+    <button data-metric="uniques">Uniques</button>
+</div>
+{% endblock %}
+
+{% block jsfoot %}
+{{ super() }}
+<script type="text/javascript">
+$(function(){
+    function loadChart($chart){
+        var url = $chart.data('fromUrl'),
+            q = $.param({'data_metric':$chart.data('metric')});
+        url = [url, q].join('?');
+        $.getJSON(url, function(data){
+            var el = $chart[0],
+                ctx = el.getContext('2d'),
+                chartOpts, chart;
+            if (typeof($chart.data('chart')) != 'undefined'){
+                $chart.data('chart').destroy();
+                $chart.removeData('chart');
+            }
+            chartOpts = {
+                'type':'line',
+                'data':data,
+                'options':{
+                    responsive:true,
+                    title:{
+                        display:false,
+                        text:'',
+                    },
+                    tooltips:{
+                        mode:'nearest',
+                        intersect:false,
+                    },
+                    legend:{
+                        display:true,
+                        position:'right',
+                    },
+                    scales:{
+    					xAxes:[{
+    						type: 'time',
+                            distribution:'linear',
+    						scaleLabel:{
+    							display:true,
+    							labelString:'Date'
+    						},
+    					}],
+    					yAxes:[{
+    						scaleLabel:{
+    							display:true,
+    							labelString:'value',
+    						},
+    					}],
+    				},
+                },
+            };
+            chart = new Chart(ctx, chartOpts);
+            $chart.data('chart', chart);
+        });
+    }
+
+    $(".chart").each(function(){
+        var $chart = $(this);
+        loadChart($chart);
+    });
+    $(".metric-select button").click(function(){
+        var $btn = $(this),
+            chartId = $btn.parents(".metric-select").data('chartId'),
+            $chart = $("#" + chartId);
+        if ($chart.data('metric') == $btn.data('metric')){
+            return;
+        }
+        $chart.data('metric', $btn.data('metric'));
+        loadChart($chart);
+    });
+});
+</script>
+{% endblock %}
