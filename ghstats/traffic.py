@@ -118,7 +118,7 @@ class AllRepos(ApiObject):
             rkwargs = {'request_handler':obj.request_handler}
             rkwargs.update(kwargs)
             rkwargs.update(doc)
-            repo = await Repo.from_db(db_store, **rkwargs)
+            repo = await Repo.from_db(**rkwargs)
             obj.repos[repo.api_path] = repo
         return obj
 
@@ -189,8 +189,8 @@ class Repo(ApiObject):
         ]
         await asyncio.wait(tasks)
     @classmethod
-    async def from_db(cls, db_store, **kwargs):
-        kwargs['db_store'] = db_store
+    async def from_db(cls, **kwargs):
+        db_store = kwargs.get('db_store')
         kwargs['_modified'] = False
         obj = cls(**kwargs)
         kwargs['repo'] = obj
@@ -206,6 +206,7 @@ class RepoTrafficViews(ApiObject):
         self._repo_slug = kwargs.get('repo_slug')
         self.repo = kwargs.get('repo')
         self.per = kwargs.get('per')
+        kwargs.setdefault('db_store', self.repo.db_store)
         kwargs['request_handler'] = self.repo.request_handler
         super().__init__(**kwargs)
         self.total_views = kwargs.get('total_views')
@@ -269,29 +270,32 @@ class RepoTrafficViews(ApiObject):
         filt['repo_slug'] = repo_slug
         return filt
     @classmethod
-    async def from_db(cls, db_store, **kwargs):
+    async def from_db(cls, **kwargs):
+        db_store = kwargs.get('db_store')
         filt = cls.get_db_lookup_filter(**kwargs)
         repo_slug = filt['repo_slug']
         coll = db_store.get_collection(cls._collection_name)
         results = {}
-        kwargs['db_store'] = db_store
         kwargs['_modified'] = False
         async for doc in coll.find(filt):
             okwargs = kwargs.copy()
             okwargs.update(doc)
             okwargs['datetime'] = utils.make_aware(okwargs['datetime'])
             obj = cls(**okwargs)
-            await obj.get_timeline_from_db(db_store)
+            await obj.get_timeline_from_db()
             results[obj.datetime] = obj
         return results
-    async def get_timeline_from_db(self, db_store):
-        self.timeline = await TrafficTimelineEntry.from_db(db_store, traffic_view=self)
+    async def get_timeline_from_db(self, **kwargs):
+        kwargs['traffic_view'] = self
+        kwargs['db_store'] = self.db_store
+        self.timeline = await TrafficTimelineEntry.from_db(**kwargs)
 
 class TrafficTimelineEntry(ApiObject):
     _serialize_attrs = ['count', 'uniques', 'timestamp']
     _collection_name = 'traffic_view_timeline'
     def __init__(self, **kwargs):
         self.traffic_view = kwargs.get('traffic_view')
+        kwargs.setdefault('db_store', self.traffic_view.db_store)
         kwargs.setdefault('_modified', self.traffic_view._modified)
         super().__init__(**kwargs)
         self.count = kwargs.get('count')
@@ -316,7 +320,8 @@ class TrafficTimelineEntry(ApiObject):
         if self._modified:
             await db_store.add_doc_if_missing(coll_name, filt, doc)
     @classmethod
-    async def from_db(cls, db_store, **kwargs):
+    async def from_db(cls, **kwargs):
+        db_store = kwargs.get('db_store')
         traffic_view = kwargs.get('traffic_view')
         tl_coll_name = 'traffic_view_timeline'
         tl_coll = db_store.get_collection(tl_coll_name)
@@ -345,6 +350,7 @@ class RepoTrafficPaths(ApiObject):
     def __init__(self, **kwargs):
         self._repo_slug = kwargs.get('repo_slug')
         self.repo = kwargs.get('repo')
+        kwargs.setdefault('db_store', self.repo.db_store)
         kwargs['request_handler'] = self.repo.request_handler
         super().__init__(**kwargs)
         self.datetime = kwargs.get('datetime')
@@ -394,10 +400,10 @@ class RepoTrafficPaths(ApiObject):
         filt['repo_slug'] = repo_slug
         return filt
     @classmethod
-    async def from_db(cls, db_store, **kwargs):
+    async def from_db(cls, **kwargs):
         filt = cls.get_db_lookup_filter(**kwargs)
         repo_slug = filt['repo_slug']
-        kwargs['db_store'] = db_store
+        db_store = kwargs.get('db_store')
         kwargs['_modified'] = False
         coll = db_store.get_collection(cls._collection_name)
         results = {}
@@ -407,11 +413,13 @@ class RepoTrafficPaths(ApiObject):
             okwargs = kwargs.copy()
             okwargs['datetime'] = key
             obj = cls(**okwargs)
-            await obj.get_data_from_db(db_store)
+            await obj.get_data_from_db()
             results[key] = obj
         return results
-    async def get_data_from_db(self, db_store):
-        self.data = await TrafficPathEntry.from_db(db_store, traffic_path=self)
+    async def get_data_from_db(self, **kwargs):
+        kwargs['traffic_path'] = self
+        kwargs['db_store'] = self.db_store
+        self.data = await TrafficPathEntry.from_db(**kwargs)
 
 class TrafficPathEntry(ApiObject):
     _serialize_attrs = ['path', 'count', 'uniques', 'title']
@@ -419,6 +427,7 @@ class TrafficPathEntry(ApiObject):
     def __init__(self, **kwargs):
         self.traffic_path = kwargs.get('traffic_path')
         kwargs.setdefault('_modified', self.traffic_path._modified)
+        kwargs.setdefault('db_store', self.traffic_path.db_store)
         super().__init__(**kwargs)
         self.path = kwargs.get('path')
         self.count = kwargs.get('count')
@@ -438,7 +447,8 @@ class TrafficPathEntry(ApiObject):
         if self._modified:
             await db_store.update_doc(coll_name, filt, doc)
     @classmethod
-    async def from_db(cls, db_store, **kwargs):
+    async def from_db(cls, **kwargs):
+        db_store = kwargs.get('db_store')
         traffic_path = kwargs.get('traffic_path')
         coll = db_store.get_collection(cls._collection_name)
         obj_filt = {
