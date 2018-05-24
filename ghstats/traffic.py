@@ -191,12 +191,22 @@ class Repo(ApiObject):
     @classmethod
     async def from_db(cls, **kwargs):
         db_store = kwargs.get('db_store')
+        load_traffic = kwargs.get('load_traffic', True)
         kwargs['_modified'] = False
         obj = cls(**kwargs)
         kwargs['repo'] = obj
-        obj.traffic_views = await RepoTrafficViews.from_db(db_store, **kwargs)
-        obj.traffic_paths = await RepoTrafficPaths.from_db(db_store, **kwargs)
+        if load_traffic:
+            obj.traffic_views = await RepoTrafficViews.from_db(**kwargs)
+            obj.traffic_paths = await RepoTrafficPaths.from_db(**kwargs)
         return obj
+    async def traffic_views_from_db_flat(self, **kwargs):
+        kwargs['repo'] = self
+        kwargs['db_store'] = self.db_store
+        self.traffic_views = await RepoTrafficViews.from_db_flat(**kwargs)
+    async def traffic_paths_from_db_flat(self, **kwargs):
+        kwargs['repo'] = self
+        kwargs['db_store'] = self.db_store
+        self.traffic_paths = await RepoTrafficPaths.from_db_flat(**kwargs)
 
 
 class RepoTrafficViews(ApiObject):
@@ -285,6 +295,17 @@ class RepoTrafficViews(ApiObject):
             await obj.get_timeline_from_db()
             results[obj.datetime] = obj
         return results
+    @classmethod
+    async def from_db_flat(cls, **kwargs):
+        kwargs['_modified'] = False
+        obj = cls(**kwargs)
+        await obj.get_timeline_from_db(**kwargs)
+        obj.total_views = 0
+        obj.total_uniques = 0
+        for entry in obj.timeline:
+            obj.total_views += entry.count
+            obj.total_uniques += entry.uniques
+        return obj
     async def get_timeline_from_db(self, **kwargs):
         kwargs['traffic_view'] = self
         kwargs['db_store'] = self.db_store
@@ -326,10 +347,13 @@ class TrafficTimelineEntry(ApiObject):
         tl_coll_name = 'traffic_view_timeline'
         tl_coll = db_store.get_collection(tl_coll_name)
         tl_keys = ['count', 'timestamp', 'uniques']
-        tl_filt = {
-            'datetime':traffic_view.datetime,
-            'repo_slug':traffic_view.repo_slug,
-        }
+        tl_filt = {'repo_slug':traffic_view.repo_slug}
+
+        if traffic_view.datetime is not None:
+            tl_filt['datetime'] = traffic_view.datetime
+        else:
+            tl_filt.update(build_datetime_filter('timestamp', **kwargs))
+
         results = []
         async for tl_doc in tl_coll.find(tl_filt, sort=[('timestamp', pymongo.ASCENDING)]):
             tl_doc['timestamp'] = utils.make_aware(tl_doc['timestamp'])
@@ -416,6 +440,12 @@ class RepoTrafficPaths(ApiObject):
             await obj.get_data_from_db()
             results[key] = obj
         return results
+    @classmethod
+    async def from_db_flat(cls, **kwargs):
+        kwargs['_modified'] = False
+        obj = cls(**kwargs)
+        await obj.get_data_from_db(**kwargs)
+        return obj
     async def get_data_from_db(self, **kwargs):
         kwargs['traffic_path'] = self
         kwargs['db_store'] = self.db_store
@@ -451,10 +481,11 @@ class TrafficPathEntry(ApiObject):
         db_store = kwargs.get('db_store')
         traffic_path = kwargs.get('traffic_path')
         coll = db_store.get_collection(cls._collection_name)
-        obj_filt = {
-            'datetime':traffic_path.datetime,
-            'repo_slug':traffic_path.repo_slug,
-        }
+        obj_filt = {'repo_slug':traffic_path.repo_slug}
+        if traffic_path.datetime is not None:
+            obj_filt['datetime'] = traffic_path.datetime
+        else:
+            obj_filt.update(build_datetime_filter('timestamp', **kwargs))
         results = []
         async for doc in coll.find(obj_filt):
             ekwargs = {
