@@ -154,6 +154,9 @@ def create_app(*args):
     )
     return app
 
-if __name__ == '__main__':
+def main():
     app = create_app()
     web.run_app(app)
+
+if __name__ == '__main__':
+    main()

@@ -47,6 +47,12 @@ setup(
     include_package_data=True,
     install_requires=INSTALL_REQUIRES,
     python_requires='>=3.6',
+    entry_points={
+        'console_scripts':[
+            'ghstats-collect = ghstats.main:main',
+            'ghstats-web = ghstats.app.main:main',
+        ],
+    },
     platforms=['any'],
     classifiers = [
         'Development Status :: 3 - Alpha',

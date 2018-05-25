@@ -36,3 +36,6 @@ def main():
         get_data(request_handler=rh, db_store=db_store)
     )
     return all_repos
+
+if __name__ == '__main__':
+    main()
