@@ -3,7 +3,7 @@ import asyncio
 import jsonfactory
 
 from ghstats.requests import RequestHandler
-from ghstats.traffic import AllRepos, Repo
+from ghstats.traffic import ApiObject, AllRepos, Repo
 from ghstats.dbstore import DbStore
 
 loop = asyncio.get_event_loop()
@@ -12,6 +12,9 @@ async def get_data(**kwargs):
     all_repos = AllRepos(**kwargs)
     await all_repos.get_repos()
     await all_repos.get_repo_data()
+    db_store = kwargs.get('db_store')
+    if db_store is not None:
+        await ApiObject.create_indexes(db_store)
     return all_repos
 
 async def store_data(all_repos):
