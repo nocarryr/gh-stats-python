@@ -27,6 +27,8 @@ class DbStore(object):
             db = self._db = c[self.db_name]
         return db
     def get_collection(self, name):
+        if not isinstance(name, str):
+            return name
         return self.db[name]
     async def get_doc(self, collection_name, filt, *args, **kwargs):
         coll = self.get_collection(collection_name)
@@ -38,12 +40,16 @@ class DbStore(object):
         coll = self.get_collection(collection_name)
         existing = await coll.count(filt)
         if existing:
-            return existing
-        return await coll.insert_one(doc)
+            return False
+        await coll.insert_one(doc)
+        return True
     async def update_doc(self, collection_name, filt, doc):
         coll = self.get_collection(collection_name)
         old_doc = await self.get_doc(collection_name, filt)
         if old_doc is None:
-            return await self.add_doc(collection_name, doc)
+            result = await self.add_doc(collection_name, doc)
+            return True, result.inserted_id
         _id = old_doc['_id']
-        return await coll.replace_one({'_id':_id}, doc)
+        result = await coll.replace_one({'_id':_id}, doc)
+        updated = result.modified_count == 1
+        return updated, result.upserted_id
