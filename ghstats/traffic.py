@@ -1,9 +1,11 @@
 import datetime
 import asyncio
+import logging
 import jsonfactory
 import pymongo
 from ghstats import utils
 
+logger = logging.getLogger(__name__)
 
 def build_datetime_filter(filter_key, **kwargs):
     start_dt = kwargs.get('start_datetime')
@@ -100,7 +102,7 @@ class ApiObject(object):
         return doc
     @classmethod
     async def create_indexes(cls, db_store):
-        print('creating indexes for {}...'.format(cls))
+        logger.info('creating indexes for {}...'.format(cls))
         coll = db_store.get_collection('request_etags')
         await coll.create_index([
             ('verb', pymongo.ASCENDING),
@@ -108,11 +110,11 @@ class ApiObject(object):
         ])
         coll = db_store.get_collection(cls._log_collection_name)
         await coll.create_index('log_timestamp')
-        print('{} indexes created'.format(cls))
+        logger.info('{} indexes created'.format(cls))
         for _cls in [Repo, RepoTrafficViews, TrafficTimelineEntry, TrafficPathEntry]:
-            print('creating indexes for {}...'.format(_cls))
+            logger.info('creating indexes for {}...'.format(_cls))
             await _cls.create_indexes(db_store)
-            print('{} indexes created'.format(_cls))
+            logger.info('{} indexes created'.format(_cls))
     def _serialize(self, attrs=None):
         if attrs is None:
             attrs = self._serialize_attrs
@@ -161,8 +163,8 @@ class AllRepos(ApiObject):
         await asyncio.wait(tasks)
         log_doc = await self.get_db_update_log(log_timestamp)
         for coll_name, update_count in log_doc['collection_updates'].items():
-            print('{} Updates: {}'.format(coll_name, update_count))
-        print('Total Updates: ', log_doc['total_updates'])
+            logger.info('{} Updates: {}'.format(coll_name, update_count))
+        logger.info('Total Updates: {}'.format(log_doc['total_updates']))
     @classmethod
     async def from_db(cls, db_store, **kwargs):
         coll = db_store.get_collection(cls._collection_name)
