@@ -20,6 +20,7 @@ def build_datetime_filter(filter_key, **kwargs):
 
 class ApiObject(object):
     _serialize_attrs = []
+    _log_collection_name = 'db_update_log'
     def __init__(self, **kwargs):
         self._cached = True
         self._modified = kwargs.get('_modified', True)
@@ -30,6 +31,32 @@ class ApiObject(object):
         return self._get_api_path()
     def _get_api_path(self):
         raise NotImplementedError('Must be defined by subclasses')
+    async def log_db_update(self, log_timestamp, collection_name, update_count):
+        doc = await self.get_db_update_log(log_timestamp)
+        if doc is None:
+            created = True
+            doc = {
+                'log_timestamp':log_timestamp,
+                'total_updates':0,
+                'collection_updates':{},
+            }
+        else:
+            created = False
+            _id = doc['_id']
+        doc['total_updates'] += update_count
+        if collection_name not in doc['collection_updates']:
+            doc['collection_updates'][collection_name] = 0
+        doc['collection_updates'][collection_name] += update_count
+        if created:
+            await self.db_store.add_doc(self._log_collection_name, doc)
+        else:
+            coll = self.db_store.get_collection(self._log_collection_name)
+            await coll.replace_one({'_id':_id}, doc)
+    async def get_db_update_log(self, log_timestamp):
+        doc = await self.db_store.get_doc(
+            self._log_collection_name, {'log_timestamp':log_timestamp}
+        )
+        return doc
     async def make_request(self, verb, api_path=None, data=None):
         if api_path is None:
             api_path = self.api_path
@@ -79,6 +106,8 @@ class ApiObject(object):
             ('verb', pymongo.ASCENDING),
             ('api_path', pymongo.ASCENDING)
         ])
+        coll = db_store.get_collection(cls._log_collection_name)
+        await coll.create_index('log_timestamp')
         print('{} indexes created'.format(cls))
         for _cls in [Repo, RepoTrafficViews, TrafficTimelineEntry, TrafficPathEntry]:
             print('creating indexes for {}...'.format(_cls))
@@ -121,12 +150,19 @@ class AllRepos(ApiObject):
         await asyncio.wait(tasks)
         if self.db_store is not None:
             await self.store_to_db()
-    async def store_to_db(self):
+    async def store_to_db(self, log_timestamp=None):
+        if log_timestamp is None:
+            log_timestamp = utils.now()
         db_store = self.db_store
+        await self.log_db_update(log_timestamp, 'repos', 0)
         tasks = []
         for repo in self.repos.values():
-            tasks.append(asyncio.ensure_future(repo.store_to_db()))
+            tasks.append(asyncio.ensure_future(repo.store_to_db(log_timestamp)))
         await asyncio.wait(tasks)
+        log_doc = await self.get_db_update_log(log_timestamp)
+        for coll_name, update_count in log_doc['collection_updates'].items():
+            print('{} Updates: {}'.format(coll_name, update_count))
+        print('Total Updates: ', log_doc['total_updates'])
     @classmethod
     async def from_db(cls, db_store, **kwargs):
         coll = db_store.get_collection(cls._collection_name)
@@ -211,7 +247,7 @@ class Repo(ApiObject):
         self.traffic_paths = tp
         await tp.get_data()
         return tp
-    async def store_to_db(self):
+    async def store_to_db(self, log_timestamp):
         coll_name = self._collection_name
         db_store = self.db_store
         filt = {'repo_slug':self.repo_slug}
@@ -219,10 +255,12 @@ class Repo(ApiObject):
         doc = self._serialize(attrs)
         doc['repo_slug'] = self.repo_slug
         if self._modified and not self._cached:
-            result = await db_store.update_doc(coll_name, filt, doc)
+            updated, _id = await db_store.update_doc(coll_name, filt, doc)
+            if updated:
+                await self.log_db_update(log_timestamp, coll_name, 1)
         tasks = [
-            asyncio.ensure_future(self.traffic_views.store_to_db()),
-            asyncio.ensure_future(self.traffic_paths.store_to_db()),
+            asyncio.ensure_future(self.traffic_views.store_to_db(log_timestamp)),
+            asyncio.ensure_future(self.traffic_paths.store_to_db(log_timestamp)),
         ]
         await asyncio.wait(tasks)
     @classmethod
@@ -314,7 +352,7 @@ class RepoTrafficViews(ApiObject):
             ],
         }
         return filt
-    async def store_to_db(self):
+    async def store_to_db(self, log_timestamp):
         coll_name = self._collection_name
         db_store = self.db_store
         filt = self.get_db_filter()
@@ -322,12 +360,14 @@ class RepoTrafficViews(ApiObject):
         doc = self._serialize(attrs)
         doc['repo_slug'] = self.repo.repo_slug
         if self._modified and not self._cached:
-            await db_store.add_doc_if_missing(coll_name, filt, doc)
-            await self.store_timeline_to_db(db_store)
-    async def store_timeline_to_db(self, db_store):
+            created = await db_store.add_doc_if_missing(coll_name, filt, doc)
+            if created:
+                await self.log_db_update(log_timestamp, coll_name, 1)
+            await self.store_timeline_to_db(db_store, log_timestamp)
+    async def store_timeline_to_db(self, db_store, log_timestamp):
         tasks = []
         for entry in self.timeline:
-            task = asyncio.ensure_future(entry.store_to_db())
+            task = asyncio.ensure_future(entry.store_to_db(log_timestamp))
             tasks.append(task)
         if len(tasks):
             await asyncio.wait(tasks)
@@ -403,7 +443,7 @@ class TrafficTimelineEntry(ApiObject):
             pymongo.IndexModel([('datetime', pymongo.ASCENDING)]),
             pymongo.IndexModel([('timestamp', pymongo.ASCENDING)]),
         ])
-    async def store_to_db(self):
+    async def store_to_db(self, log_timestamp):
         coll_name = self._collection_name
         db_store = self.db_store
         doc = {
@@ -415,7 +455,9 @@ class TrafficTimelineEntry(ApiObject):
         }
         filt = {'datetime':self.traffic_view.datetime, 'repo_slug':self.repo_slug}
         if self.traffic_view._modified and not self.traffic_view._cached:
-            await db_store.add_doc_if_missing(coll_name, filt, doc)
+            created = await db_store.add_doc_if_missing(coll_name, filt, doc)
+            if created:
+                await self.log_db_update(log_timestamp, coll_name, 1)
     @classmethod
     async def from_db(cls, **kwargs):
         db_store = kwargs.get('db_store')
@@ -482,11 +524,11 @@ class RepoTrafficPaths(ApiObject):
             ],
         }
         return filt
-    async def store_to_db(self):
+    async def store_to_db(self, log_timestamp):
         db_store = self.db_store
         tasks = []
         for entry in self.data:
-            task = asyncio.ensure_future(entry.store_to_db())
+            task = asyncio.ensure_future(entry.store_to_db(log_timestamp))
             tasks.append(task)
         if len(tasks):
             await asyncio.wait(tasks)
@@ -551,14 +593,16 @@ class TrafficPathEntry(ApiObject):
             pymongo.IndexModel('repo_slug'),
             pymongo.IndexModel([('datetime', pymongo.ASCENDING)]),
         ])
-    async def store_to_db(self):
+    async def store_to_db(self, log_timestamp):
         coll_name = self._collection_name
         db_store = self.db_store
         filt = self.traffic_path.get_db_filter()
         doc = {'repo_slug':self.repo_slug, 'datetime':self.traffic_path.datetime}
         doc.update(self._serialize())
         if self.traffic_path._modified and not self.traffic_path._cached:
-            await db_store.update_doc(coll_name, filt, doc)
+            updated, _ = await db_store.update_doc(coll_name, filt, doc)
+            if updated:
+                await self.log_db_update(log_timestamp, coll_name, 1)
     @classmethod
     async def from_db(cls, **kwargs):
         db_store = kwargs.get('db_store')
