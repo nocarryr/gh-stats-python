@@ -21,6 +21,7 @@ def build_datetime_filter(filter_key, **kwargs):
 class ApiObject(object):
     _serialize_attrs = []
     def __init__(self, **kwargs):
+        self._cached = True
         self._modified = kwargs.get('_modified', True)
         self.request_handler = kwargs.get('request_handler')
         self.db_store = kwargs.get('db_store')
@@ -35,6 +36,7 @@ class ApiObject(object):
         cache = await self.get_etag_from_db(verb, api_path)
         if cache is not None:
             headers = {'If-None-Match':cache['etag']}
+            self._etag = cache['etag']
         else:
             headers = None
         rh = self.request_handler
@@ -43,9 +45,12 @@ class ApiObject(object):
         )
         if status_code == 304:
             resp_data = cache['response_data']
+            self._cached = True
             self._modified = False
         else:
-            await self.update_etag_to_db(verb, api_path, resp_data, header_data)
+            doc = await self.update_etag_to_db(verb, api_path, resp_data, header_data)
+            self._etag = doc['etag']
+            self._cached = False
         return resp_data
     async def get_etag_from_db(self, verb, api_path):
         if self.db_store is None:
@@ -65,6 +70,7 @@ class ApiObject(object):
         doc.update(filt)
         doc['response_data'] = resp_data
         await self.db_store.update_doc(coll_name, filt, doc)
+        return doc
     @classmethod
     async def create_indexes(cls, db_store):
         print('creating indexes for {}...'.format(cls))
@@ -212,7 +218,7 @@ class Repo(ApiObject):
         attrs = [a for a in self._serialize_attrs if a not in ['traffic_views', 'traffic_paths']]
         doc = self._serialize(attrs)
         doc['repo_slug'] = self.repo_slug
-        if self._modified:
+        if self._modified and not self._cached:
             result = await db_store.update_doc(coll_name, filt, doc)
         tasks = [
             asyncio.ensure_future(self.traffic_views.store_to_db()),
@@ -315,7 +321,7 @@ class RepoTrafficViews(ApiObject):
         attrs = [a for a in self._serialize_attrs if a not in 'timeline']
         doc = self._serialize(attrs)
         doc['repo_slug'] = self.repo.repo_slug
-        if self._modified:
+        if self._modified and not self._cached:
             await db_store.add_doc_if_missing(coll_name, filt, doc)
             await self.store_timeline_to_db(db_store)
     async def store_timeline_to_db(self, db_store):
@@ -408,7 +414,7 @@ class TrafficTimelineEntry(ApiObject):
             'datetime':self.traffic_view.datetime,
         }
         filt = {'datetime':self.traffic_view.datetime, 'repo_slug':self.repo_slug}
-        if self._modified:
+        if self.traffic_view._modified and not self.traffic_view._cached:
             await db_store.add_doc_if_missing(coll_name, filt, doc)
     @classmethod
     async def from_db(cls, **kwargs):
@@ -551,7 +557,7 @@ class TrafficPathEntry(ApiObject):
         filt = self.traffic_path.get_db_filter()
         doc = {'repo_slug':self.repo_slug, 'datetime':self.traffic_path.datetime}
         doc.update(self._serialize())
-        if self._modified:
+        if self.traffic_path._modified and not self.traffic_path._cached:
             await db_store.update_doc(coll_name, filt, doc)
     @classmethod
     async def from_db(cls, **kwargs):
