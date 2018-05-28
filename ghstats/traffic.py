@@ -104,10 +104,13 @@ class ApiObject(object):
     async def create_indexes(cls, db_store):
         logger.info('creating indexes for {}...'.format(cls))
         coll = db_store.get_collection('request_etags')
-        await coll.create_index([
-            ('verb', pymongo.ASCENDING),
-            ('api_path', pymongo.ASCENDING)
-        ])
+        await coll.create_index(
+            [
+                ('verb', pymongo.ASCENDING),
+                ('api_path', pymongo.ASCENDING),
+            ],
+            unique=True,
+        )
         coll = db_store.get_collection(cls._log_collection_name)
         await coll.create_index('log_timestamp')
         logger.info('{} indexes created'.format(cls))
@@ -220,7 +223,7 @@ class Repo(ApiObject):
     @classmethod
     async def create_indexes(cls, db_store):
         coll = db_store.get_collection(cls._collection_name)
-        await coll.create_index('repo_slug')
+        await coll.create_index('repo_slug', unique=True)
     async def get_data(self, now=None):
         if now is None:
             now = utils.now()
@@ -377,8 +380,10 @@ class RepoTrafficViews(ApiObject):
     async def create_indexes(cls, db_store):
         coll = db_store.get_collection(cls._collection_name)
         await coll.create_indexes([
-            pymongo.IndexModel('repo_slug'),
-            pymongo.IndexModel([('datetime', pymongo.ASCENDING)]),
+            pymongo.IndexModel([
+                ('repo_slug', pymongo.ASCENDING),
+                ('datetime', pymongo.ASCENDING),
+            ], unique=True),
         ])
     @classmethod
     def get_db_lookup_filter(cls, **kwargs):
@@ -441,9 +446,26 @@ class TrafficTimelineEntry(ApiObject):
     async def create_indexes(cls, db_store):
         coll = db_store.get_collection(cls._collection_name)
         await coll.create_indexes([
-            pymongo.IndexModel('repo_slug'),
-            pymongo.IndexModel([('datetime', pymongo.ASCENDING)]),
-            pymongo.IndexModel([('timestamp', pymongo.ASCENDING)]),
+            pymongo.IndexModel(
+                [
+                    ('repo_slug', pymongo.ASCENDING),
+                    ('datetime', pymongo.ASCENDING),
+                ],
+            ),
+            pymongo.IndexModel(
+                [
+                    ('repo_slug', pymongo.ASCENDING),
+                    ('timestamp', pymongo.ASCENDING),
+                ],
+            ),
+            pymongo.IndexModel(
+                [
+                    ('repo_slug', pymongo.ASCENDING),
+                    ('datetime', pymongo.ASCENDING),
+                    ('timestamp', pymongo.ASCENDING),
+                ],
+                unique=True,
+            ),
         ])
     async def store_to_db(self, log_timestamp):
         coll_name = self._collection_name
@@ -592,8 +614,20 @@ class TrafficPathEntry(ApiObject):
     async def create_indexes(cls, db_store):
         coll = db_store.get_collection(cls._collection_name)
         await coll.create_indexes([
-            pymongo.IndexModel('repo_slug'),
-            pymongo.IndexModel([('datetime', pymongo.ASCENDING)]),
+            pymongo.IndexModel(
+                [
+                    ('repo_slug', pymongo.ASCENDING),
+                    ('datetime', pymongo.ASCENDING),
+                ],
+            ),
+            pymongo.IndexModel(
+                [
+                    ('repo_slug', pymongo.ASCENDING),
+                    ('datetime', pymongo.ASCENDING),
+                    ('path', pymongo.ASCENDING),
+                ],
+                unique=True,
+            ),
         ])
     async def store_to_db(self, log_timestamp):
         coll_name = self._collection_name
