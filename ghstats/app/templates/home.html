@@ -1,6 +1,25 @@
 {% extends "base.html" %}
 
 {% block body %}
+<form class="chart-form"
+      data-chart-id="timeline-chart"
+      action="/traffic-data/"
+      method="get">
+    <label for="start_datetime_input">Start Date</label>
+    <input type="datetime-local"
+           id="start_datetime_input"
+           name="start_datetime"
+           data-value="{{ start_datetime_str }}">
+    <label for="end_datetime_input">End Date</label>
+    <input type="datetime-local"
+           id="end_datetime_input"
+           name="end_datetime"
+           data-value="{{ end_datetime_str }}">
+    <label for="limit_input">Limit Repos</label>
+    <input type="number" id="limit_input" name="limit" value="{{ limit }}">
+    <input type="hidden" name="data_metric" value="{{ data_metric }}">
+    <input type="submit" value="Update">
+</form>
 <canvas id="timeline-chart"
         class="chart"
         data-from-url="/traffic-data/"
@@ -16,56 +35,104 @@
 {{ super() }}
 <script type="text/javascript">
 $(function(){
+    function zeroPad(s, ndigits){
+        if (typeof(s) != 'string'){
+            s = s.toString();
+        }
+        while (s.length < ndigits){
+            s = '0' + s;
+        }
+        return s;
+    }
+    function updateDtPicker($el, value){
+        var dateStr, timeStr;
+        if (!value){
+            return;
+        }
+        if (!(value instanceof Date)){
+            value = new Date(value);
+        }
+        dateStr = [
+            value.getFullYear().toString(),
+            zeroPad(value.getMonth()+1, 2),
+            zeroPad(value.getDate(), 2),
+        ].join('-');
+        timeStr = [
+            zeroPad(value.getHours(), 2),
+            zeroPad(value.getMinutes(), 2),
+            '00',
+            // zeroPad(value.getSeconds(), 2),
+        ].join(':');
+        $el.val([dateStr, timeStr].join('T'));
+    }
+    $("input[type=datetime-local]").each(function(){
+        var $el = $(this),
+            dt = new Date($el.data('value'));
+        if (!$el.data('value')){
+            return;
+        }
+        updateDtPicker($el, dt);
+    });
+
     function loadChart($chart){
-        var url = $chart.data('fromUrl'),
-            q = $.param({'data_metric':$chart.data('metric')});
-        url = [url, q].join('?');
-        $.getJSON(url, function(data){
-            var el = $chart[0],
-                ctx = el.getContext('2d'),
-                chartOpts, chart;
-            if (typeof($chart.data('chart')) != 'undefined'){
-                $chart.data('chart').destroy();
-                $chart.removeData('chart');
-            }
-            chartOpts = {
-                'type':'line',
-                'data':data,
-                'options':{
-                    responsive:true,
-                    title:{
-                        display:false,
-                        text:'',
+        var $form = $("form[data-chart-id=I]".replace('I', $chart.attr('id')));
+        $form.on("submit", function(e){
+            var url = $form.attr('action'),
+                q = $form.serialize();
+
+            url = [url, q].join('?');
+            e.preventDefault();
+            $.getJSON(url, function(data){
+                var el = $chart[0],
+                    ctx = el.getContext('2d'),
+                    chartOpts, chart;
+                if (typeof($chart.data('chart')) != 'undefined'){
+                    $chart.data('chart').destroy();
+                    $chart.removeData('chart');
+                }
+                $chart.data('chart_data', data);
+                updateDtPicker($("[name=start_datetime]", $form), data.start_datetime);
+                updateDtPicker($("[name=end_datetime]", $form), data.end_datetime);
+
+                chartOpts = {
+                    'type':'line',
+                    'data':data.chart_data,
+                    'options':{
+                        responsive:true,
+                        title:{
+                            display:false,
+                            text:'',
+                        },
+                        tooltips:{
+                            mode:'nearest',
+                            intersect:false,
+                        },
+                        legend:{
+                            display:true,
+                            position:'right',
+                        },
+                        scales:{
+                            xAxes:[{
+                                type: 'time',
+                                distribution:'linear',
+                                scaleLabel:{
+                                    display:true,
+                                    labelString:'Date'
+                                },
+                            }],
+                            yAxes:[{
+                                scaleLabel:{
+                                    display:true,
+                                    labelString:'value',
+                                },
+                            }],
+                        },
                     },
-                    tooltips:{
-                        mode:'nearest',
-                        intersect:false,
-                    },
-                    legend:{
-                        display:true,
-                        position:'right',
-                    },
-                    scales:{
-    					xAxes:[{
-    						type: 'time',
-                            distribution:'linear',
-    						scaleLabel:{
-    							display:true,
-    							labelString:'Date'
-    						},
-    					}],
-    					yAxes:[{
-    						scaleLabel:{
-    							display:true,
-    							labelString:'value',
-    						},
-    					}],
-    				},
-                },
-            };
-            chart = new Chart(ctx, chartOpts);
-            $chart.data('chart', chart);
-        });
+                };
+                chart = new Chart(ctx, chartOpts);
+                $chart.data('chart', chart);
+            });
+        }).submit();
     }
 
     $(".chart").each(function(){
@@ -75,12 +142,13 @@ $(function(){
     $(".metric-select button").click(function(){
         var $btn = $(this),
             chartId = $btn.parents(".metric-select").data('chartId'),
-            $chart = $("#" + chartId);
-        if ($chart.data('metric') == $btn.data('metric')){
+            $form = $("form[data-chart-id=I]".replace('I', chartId)),
+            $el = $("input[name=data_metric]", $form);
+        if ($el.val() == $btn.data('metric')){
             return;
         }
-        $chart.data('metric', $btn.data('metric'));
-        loadChart($chart);
+        $el.val($btn.data('metric'));
+        $form.submit();
     });
 });
 </script>

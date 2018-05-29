@@ -63,12 +63,21 @@ def update_context_dt_range(request, context=None):
         context = {}
     for key in ['start_datetime', 'end_datetime']:
         dt = request.query.get(key)
+        if isinstance(dt, str) and not len(dt):
+            dt = None
         if dt is None:
             if key in context:
                 del context[key]
         else:
+            if isinstance(dt, str) and not dt.endswith('Z'):
+                dt = '{}Z'.format(dt)
             dt = parse_query_dt(dt)
             context[key] = dt
+            context['{}_str'.format(key)] = utils.dt_to_str(dt)
+    if not context.get('end_datetime'):
+        now = utils.now()
+        context['end_datetime'] = now
+        context['end_datetime_str'] = utils.dt_to_str(now)
     return context
 
 
@@ -79,7 +88,8 @@ async def get_traffic_chart_data(app, context):
     limit = context.get('limit', 10)
     all_dts = set()
     by_counts = {}
-    repo_data = {'datasets':[]}
+    data = {}
+    chart_data = {'datasets':[]}
     for i, repo in enumerate(reversed(sorted(repos.values()))):
         repo_slug = repo.repo_slug
         count = repo.traffic_views.total_views
@@ -123,13 +133,17 @@ async def get_traffic_chart_data(app, context):
                 tdata['data'].append({
                     't':dtstr, 'y':value,
                 })
-            repo_data['datasets'].append(tdata)
-    return repo_data
+            chart_data['datasets'].append(tdata)
+    start_dt = min(all_dts.keys())
+    data['start_datetime'] = utils.dt_to_str(start_dt)
+    data['chart_data'] = chart_data
+    return data
 
 
 @aiohttp_jinja2.template('home.html')
 async def home(request):
-    context = {'DT_FMT':utils.DT_FMT, 'data_metric':'count'}
+    context = update_context_dt_range(request)
+    context.update({'DT_FMT':utils.DT_FMT, 'data_metric':'count', 'limit':10})
     return context
 
 async def get_traffic_chart_data_json(request):
@@ -137,8 +151,13 @@ async def get_traffic_chart_data_json(request):
     metric = request.query.get('data_metric', 'count')
     assert metric in ['count', 'uniques']
     context['data_metric'] = metric
+    limit = request.query.get('limit', 10)
+    if isinstance(limit, str):
+        assert limit.isalnum()
+        limit = int(limit)
+    context['limit'] = limit
     chart_data = await get_traffic_chart_data(request.app, context)
-    return web.json_response(chart_data)
+    return web.json_response(chart_data, dumps=utils.jsonfactory.dumps)
 
 
 def create_app(*args):
