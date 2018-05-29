@@ -80,62 +80,80 @@ def update_context_dt_range(request, context=None):
         context['end_datetime_str'] = utils.dt_to_str(now)
     return context
 
+async def get_repos_by_rank(app, context, metric='count', limit=10):
+    repos = context['repos']
+    db_store = app['db_store']
+    coll = db_store.get_collection(traffic.TrafficTimelineEntry._collection_name)
+    repo_slugs = [repo.repo_slug for repo in repos.values()]
+    pipeline = [
+        {'$match':{'repo_slug':{'$in':repo_slugs}}},
+        {'$group':{
+            '_id':'$repo_slug',
+            'total':{'$sum':'${}'.format(metric)},
+        }},
+        {'$sort':{'total':-1}},
+        {'$limit':limit},
+    ]
+    async for doc in coll.aggregate(pipeline):
+        yield doc
+
+async def get_timeline_for_repo(app, context, repo, metric):
+    db_store = app['db_store']
+    if isinstance(repo, traffic.Repo):
+        repo_slug = repo.repo_slug
+    else:
+        repo_slug = repo
+    coll = db_store.get_collection(traffic.TrafficTimelineEntry._collection_name)
+    filt = traffic.build_datetime_filter('timestamp', **context)
+    filt['repo_slug'] = repo_slug
+    pipeline = [
+        {'$match':filt},
+        {'$group':{
+            '_id':'$timestamp',
+            'value':{'$max':'${}'.format(metric)},
+        }},
+        {'$sort':{'_id':1}},
+    ]
+    async for doc in coll.aggregate(pipeline):
+        doc['timestamp'] = utils.make_aware(doc['_id'])
+        yield doc
+
 
 async def get_traffic_chart_data(app, context):
-    await update_traffic_data(app, context)
-    repos = context['repos']
+    repos = await get_repos(app, context)
     metric = context.get('data_metric', 'count')
     limit = context.get('limit', 10)
-    all_dts = set()
+    all_dts = {}
     by_counts = {}
     data = {}
     chart_data = {'datasets':[]}
-    for i, repo in enumerate(reversed(sorted(repos.values()))):
-        repo_slug = repo.repo_slug
-        count = repo.traffic_views.total_views
-        if not count:
-            continue
-        if i > limit:
-            break
-        dts = set((e.timestamp for e in repo.traffic_views.timeline))
-        all_dts |= dts
-        if count not in by_counts:
-            by_counts[count] = {}
-        by_counts[count][repo_slug] = repo
-    all_dts = list(sorted(all_dts))
     color_iter = iter_colors()
-    all_dt_str = [utils.dt_to_str(dt) for dt in all_dts]
-    for count, _repos in by_counts.items():
-        for repo_slug in sorted(_repos.keys()):
-            repo = _repos[repo_slug]
-            color = next(color_iter)
-            tdata = {
-                'label':'{} Total'.format(repo_slug),
-                'fill':False,
-                'data':[],
-                'backgroundColor':color,
-                'borderColor':color,
-                'lineTension':0,
-            }
-            if metric == 'count':
-                tdata['label'] = '{} Total'.format(repo_slug)
-            elif metric == 'uniques':
-                tdata['label'] = '{} Uniques'.format(repo_slug)
-            timeline = repo.traffic_views.timeline
-
-            entries = {e.timestamp:e for e in timeline}
-            for dt, dtstr in zip(all_dts, all_dt_str):
-                if dt not in entries:
-                    value = None
-                else:
-                    e = entries[dt]
-                    value = getattr(e, metric)
-                tdata['data'].append({
-                    't':dtstr, 'y':value,
-                })
-            chart_data['datasets'].append(tdata)
+    async for repo_doc in get_repos_by_rank(app, context, metric, limit):
+        repo_slug = repo_doc['_id']
+        color = next(color_iter)
+        tdata = {
+            'label':'{} Total'.format(repo_slug),
+            'fill':False,
+            'data':[],
+            'backgroundColor':color,
+            'borderColor':color,
+            'lineTension':0,
+            'spanGaps':True,
+        }
+        if metric == 'count':
+            tdata['label'] = '{} Total'.format(repo_slug)
+        elif metric == 'uniques':
+            tdata['label'] = '{} Uniques'.format(repo_slug)
+        async for tl_doc in get_timeline_for_repo(app, context, repo_slug, metric):
+            dt = tl_doc['timestamp']
+            dt_str = all_dts.get(dt)
+            if dt_str is None:
+                dt_str = utils.dt_to_str(dt)
+                all_dts[dt] = dt_str
+            tdata['data'].append({'t':dt_str, 'y':tl_doc['value']})
+        chart_data['datasets'].append(tdata)
     start_dt = min(all_dts.keys())
-    data['start_datetime'] = utils.dt_to_str(start_dt)
+    data['start_datetime'] = all_dts[start_dt]
     data['chart_data'] = chart_data
     return data
 
