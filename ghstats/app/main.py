@@ -13,6 +13,7 @@ from ghstats import utils
 from ghstats.app.colorutils import iter_colors
 
 BASE_PATH = os.path.abspath(os.path.dirname(__file__))
+STATIC_ROOT = os.path.join(BASE_PATH, 'static')
 
 
 def parse_query_dt(o):
@@ -165,6 +166,7 @@ async def get_traffic_chart_data(app, context):
 async def home(request):
     context = update_context_dt_range(request)
     context.update({
+        'request':request,
         'DT_FMT':utils.DT_FMT,
         'data_metric':'count',
         'limit':10,
@@ -194,6 +196,7 @@ def create_app(*args):
     app.add_routes([
         web.get('/', home),
         web.get('/traffic-data/', get_traffic_chart_data_json),
+        web.static('/static', STATIC_ROOT, name='static'),
     ])
     app.on_startup.append(create_dbstore)
     aiohttp_jinja2.setup(
