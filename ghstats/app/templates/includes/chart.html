@@ -1,0 +1,30 @@
+<form class="chart-form"
+      data-chart-id="{{ chart_id }}"
+      action="{{ chart_data_url }}"
+      method="get">
+    <label for="start_datetime_input">Start Date</label>
+    <input type="datetime-local"
+           id="start_datetime_input"
+           name="start_datetime"
+           data-value="{{ start_datetime_str }}">
+    <label for="end_datetime_input">End Date</label>
+    <input type="datetime-local"
+           id="end_datetime_input"
+           name="end_datetime"
+           data-value="{{ end_datetime_str }}">
+    <label for="limit_input">Limit Repos</label>
+    <input type="number" id="limit_input" name="limit" value="{{ limit }}">
+    <input type="hidden" name="data_metric" value="{{ data_metric }}">
+    <input type="hidden" name="hidden_repos" value="{{ hidden_repos }}">
+    <input type="hidden" name="repo_slugs" value="{{ repo_slugs }}">
+    <input type="submit" value="Update">
+</form>
+<canvas id="{{ chart_id }}"
+        class="chart"
+        data-from-url="{{ chart_data_url }}"
+        data-dt-format="{{ DT_FMT }}"
+        data-metric="{{ data_metric }}"></canvas>
+<div class="metric-select" data-chart-id="{{ chart_id }}">
+    <button data-metric="count">Count</button>
+    <button data-metric="uniques">Uniques</button>
+</div>

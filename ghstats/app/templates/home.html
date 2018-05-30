@@ -1,38 +1,23 @@
 {% extends "base.html" %}
 
 {% block body %}
-<form class="chart-form"
-      data-chart-id="timeline-chart"
-      action="/traffic-data/"
-      method="get">
-    <label for="start_datetime_input">Start Date</label>
-    <input type="datetime-local"
-           id="start_datetime_input"
-           name="start_datetime"
-           data-value="{{ start_datetime_str }}">
-    <label for="end_datetime_input">End Date</label>
-    <input type="datetime-local"
-           id="end_datetime_input"
-           name="end_datetime"
-           data-value="{{ end_datetime_str }}">
-    <label for="limit_input">Limit Repos</label>
-    <input type="number" id="limit_input" name="limit" value="{{ limit }}">
-    <input type="hidden" name="data_metric" value="{{ data_metric }}">
-    <input type="hidden" name="hidden_repos" value="{{ hidden_repos }}">
-    <input type="submit" value="Update">
-</form>
-<canvas id="timeline-chart"
-        class="chart"
-        data-from-url="/traffic-data/"
-        data-dt-format="{{ DT_FMT }}"
-        data-metric="{{ data_metric }}"></canvas>
-<div class="metric-select" data-chart-id="timeline-chart">
-    <button data-metric="count">Count</button>
-    <button data-metric="uniques">Uniques</button>
+{% include "includes/chart.html" with context %}
+<div id="repo-hrefs" style="display:none;" data-chart-id="{{ chart_id }}">
+    {% for repo in repos.values() %}
+    <a href="{{ repo.detail_url }}">{{ repo.repo_slug }}</a>
+    {% endfor %}
 </div>
 {% endblock %}
 
 {% block jsfoot %}
 {{ super() }}
 <script src="{{ request.app.router.static.url_for(filename='chartloader.js') }}"></script>
+<script type="text/javascript">
+$(function(){
+    $("#timeline-chart").on('repoClicked', function(e, repoSlug){
+        var $a = $("#repo-hrefs a:contains(T)".replace('T', repoSlug));
+        window.location.href = $a.attr('href');
+    });
+});
+</script>
 {% endblock %}

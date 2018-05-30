@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block body %}
+<h1>{{ repo.repo_slug }}</h1>
+<div id="chart-container">
+    {% include "includes/chart.html" with context %}
+</div>
+{% endblock %}
+
+{% block jsfoot %}
+{{ super() }}
+<script src="{{ request.app.router.static.url_for(filename='chartloader.js') }}"></script>
+{% endblock %}

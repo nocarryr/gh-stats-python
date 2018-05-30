@@ -1,4 +1,5 @@
 import os
+import urllib
 import datetime
 import numbers
 import asyncio
@@ -43,6 +44,9 @@ async def get_repos(app, context):
         kw = {'db_store':app['db_store']}
         kw.update(doc)
         repo = await traffic.Repo.from_db(load_traffic=False, **kw)
+        repo.detail_url = app.router['repo_detail'].url_for(
+            repo_slug=urllib.parse.quote_plus(repo.repo_slug),
+        )
         d[repo.repo_slug] = repo
     context['repos'] = d
     return d
@@ -83,9 +87,11 @@ def update_context_dt_range(request, context=None):
 
 async def get_repos_by_rank(app, context, metric='count', limit=10):
     repos = context['repos']
+    repo_slugs = context.get('repo_slugs')
     db_store = app['db_store']
     coll = db_store.get_collection(traffic.TrafficTimelineEntry._collection_name)
-    repo_slugs = [repo.repo_slug for repo in repos.values()]
+    if not repo_slugs:
+        repo_slugs = [repo.repo_slug for repo in repos.values()]
     pipeline = [
         {'$match':{'repo_slug':{'$in':repo_slugs}}},
         {'$group':{
@@ -129,7 +135,7 @@ async def get_traffic_chart_data(app, context):
     by_counts = {}
     data = {'dataset_ids':[]}
     chart_data = {'datasets':[]}
-    color_iter = iter_colors()
+    color_iter = context.get('color_iter', iter_colors())
     async for repo_doc in get_repos_by_rank(app, context, metric, limit):
         repo_slug = repo_doc['_id']
         color = next(color_iter)
@@ -165,17 +171,44 @@ async def get_traffic_chart_data(app, context):
 @aiohttp_jinja2.template('home.html')
 async def home(request):
     context = update_context_dt_range(request)
+    repos = await get_repos(request.app, context)
     context.update({
         'request':request,
+        'repos':repos,
         'DT_FMT':utils.DT_FMT,
         'data_metric':'count',
         'limit':10,
         'hidden_repos':'',
+        'chart_id':'timeline-chart',
+        'chart_data_url':'/traffic-data/',
     })
     return context
 
-async def get_traffic_chart_data_json(request):
+@aiohttp_jinja2.template('repo_detail.html')
+async def repo_detail(request):
+    repo_slug = request.match_info['repo_slug']
+    repo_slug = urllib.parse.unquote_plus(repo_slug)
     context = update_context_dt_range(request)
+    context.update({
+        'request':request,
+        'repo_slug':repo_slug,
+        'repo_slugs':repo_slug,
+        'DT_FMT':utils.DT_FMT,
+        'data_metric':'count',
+        'limit':10,
+        'hidden_repos':'',
+        'chart_id':'timeline-chart',
+        'chart_data_url':'/combined-data/',
+    })
+    repos = await get_repos(request.app, context)
+    context['repo'] = repos[repo_slug]
+    return context
+
+async def prepare_chart_data_view_context(request):
+    context = update_context_dt_range(request)
+    repo_slugs = request.query.get('repo_slugs')
+    if repo_slugs:
+        context['repo_slugs'] = repo_slugs.split(',')
     hidden_repos = request.query.get('hidden_repos', '')
     hidden_repos = hidden_repos.split(',')
     context['hidden_repos'] = hidden_repos
@@ -187,15 +220,31 @@ async def get_traffic_chart_data_json(request):
         assert limit.isalnum()
         limit = int(limit)
     context['limit'] = limit
+    return context
+
+async def get_traffic_chart_data_json(request):
+    context = await prepare_chart_data_view_context(request)
     chart_data = await get_traffic_chart_data(request.app, context)
     return web.json_response(chart_data, dumps=utils.jsonfactory.dumps)
 
+async def get_combined_chart_data_json(request):
+    context = await prepare_chart_data_view_context(request)
+    context['color_iter'] = iter_colors()
+    context['data_metric'] = 'count'
+    count_data = await get_traffic_chart_data(request.app, context)
+    context['data_metric'] = 'uniques'
+    unique_data = await get_traffic_chart_data(request.app, context)
+    count_data['chart_data']['datasets'].extend(unique_data['chart_data']['datasets'])
+    count_data['dataset_ids'].extend(unique_data['dataset_ids'])
+    return web.json_response(count_data, dumps=utils.jsonfactory.dumps)
 
 def create_app(*args):
     app = web.Application()
     app.add_routes([
         web.get('/', home),
+        web.get(r'/repos/detail/{repo_slug}', repo_detail, name='repo_detail'),
         web.get('/traffic-data/', get_traffic_chart_data_json),
+        web.get('/combined-data/', get_combined_chart_data_json),
         web.static('/static', STATIC_ROOT, name='static'),
     ])
     app.on_startup.append(create_dbstore)

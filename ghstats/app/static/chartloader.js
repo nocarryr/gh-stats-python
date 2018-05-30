@@ -70,6 +70,7 @@ $(function(){
                     $chart.removeData('chart');
                 }
                 $chart.data('chart_data', data);
+                $chart.data('hoverTarget', null);
                 updateDtPicker($("[name=start_datetime]", $form), data.start_datetime);
                 updateDtPicker($("[name=end_datetime]", $form), data.end_datetime);
 
@@ -77,10 +78,31 @@ $(function(){
                     'type':'line',
                     'data':data.chart_data,
                     'options':{
+                        onClick:function(e, elems){
+                            var hoverTarget = $chart.data('hoverTarget');
+                            if (hoverTarget === null){
+                                return;
+                            }
+                            $chart.trigger('repoClicked', [hoverTarget]);
+                        },
+                        onHover:function(e, elems){
+                            var index, itemKey;
+                            if (elems.length != 1){
+                                $chart.data('hoverTarget', null);
+                                return;
+                            }
+                            index = elems[0]._datasetIndex;
+                            itemKey = data.dataset_ids[index];
+                            $chart.data('hoverTarget', itemKey);
+                        },
                         responsive:true,
                         title:{
                             display:false,
                             text:'',
+                        },
+                        hover:{
+                            mode:'nearest',
+                            intersect:false,
                         },
                         tooltips:{
                             mode:'nearest',
