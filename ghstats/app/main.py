@@ -121,11 +121,12 @@ async def get_timeline_for_repo(app, context, repo, metric):
 
 async def get_traffic_chart_data(app, context):
     repos = await get_repos(app, context)
+    hidden_repos = context['hidden_repos']
     metric = context.get('data_metric', 'count')
     limit = context.get('limit', 10)
     all_dts = {}
     by_counts = {}
-    data = {}
+    data = {'dataset_ids':[]}
     chart_data = {'datasets':[]}
     color_iter = iter_colors()
     async for repo_doc in get_repos_by_rank(app, context, metric, limit):
@@ -139,7 +140,9 @@ async def get_traffic_chart_data(app, context):
             'borderColor':color,
             'lineTension':0,
             'spanGaps':True,
+            'hidden':repo_slug in hidden_repos,
         }
+        data['dataset_ids'].append(repo_slug)
         if metric == 'count':
             tdata['label'] = '{} Total'.format(repo_slug)
         elif metric == 'uniques':
@@ -161,11 +164,19 @@ async def get_traffic_chart_data(app, context):
 @aiohttp_jinja2.template('home.html')
 async def home(request):
     context = update_context_dt_range(request)
-    context.update({'DT_FMT':utils.DT_FMT, 'data_metric':'count', 'limit':10})
+    context.update({
+        'DT_FMT':utils.DT_FMT,
+        'data_metric':'count',
+        'limit':10,
+        'hidden_repos':'',
+    })
     return context
 
 async def get_traffic_chart_data_json(request):
     context = update_context_dt_range(request)
+    hidden_repos = request.query.get('hidden_repos', '')
+    hidden_repos = hidden_repos.split(',')
+    context['hidden_repos'] = hidden_repos
     metric = request.query.get('data_metric', 'count')
     assert metric in ['count', 'uniques']
     context['data_metric'] = metric
