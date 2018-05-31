@@ -15,8 +15,8 @@
     <label for="limit_input">Limit Repos</label>
     <input type="number" id="limit_input" name="limit" value="{{ limit }}">
     <input type="hidden" name="data_metric" value="{{ data_metric }}">
-    <input type="hidden" name="hidden_repos" value="{{ hidden_repos }}">
-    <input type="hidden" name="repo_slugs" value="{{ repo_slugs }}">
+    <input type="hidden" name="hidden_repos" value="{{ hidden_repos|list_to_str }}">
+    <input type="hidden" name="repo_slugs" value="{{ repo_slugs|list_to_str }}">
     <input type="submit" value="Update">
 </form>
 <canvas id="{{ chart_id }}"

@@ -12,6 +12,7 @@ from ghstats import traffic
 from ghstats.dbstore import DbStore
 from ghstats import utils
 from ghstats.app.colorutils import iter_colors
+from ghstats.app import templatetags
 
 BASE_PATH = os.path.abspath(os.path.dirname(__file__))
 STATIC_ROOT = os.path.join(BASE_PATH, 'static')
@@ -186,10 +187,11 @@ async def home(request):
     context.update({
         'request':request,
         'repos':repos,
+        'repo_slugs':[],
         'DT_FMT':utils.DT_FMT,
         'data_metric':'count',
         'limit':10,
-        'hidden_repos':'',
+        'hidden_repos':[],
         'chart_id':'timeline-chart',
         'chart_data_url':'/traffic-data/',
     })
@@ -203,11 +205,11 @@ async def repo_detail(request):
     context.update({
         'request':request,
         'repo_slug':repo_slug,
-        'repo_slugs':repo_slug,
+        'repo_slugs':[repo_slug],
         'DT_FMT':utils.DT_FMT,
         'data_metric':'count',
         'limit':10,
-        'hidden_repos':'',
+        'hidden_repos':[],
         'chart_id':'timeline-chart',
         'chart_data_url':'/combined-data/',
     })
@@ -217,11 +219,17 @@ async def repo_detail(request):
 
 async def prepare_chart_data_view_context(request):
     context = update_context_dt_range(request)
-    repo_slugs = request.query.get('repo_slugs')
-    if repo_slugs:
-        context['repo_slugs'] = repo_slugs.split(',')
+    repo_slugs = request.query.get('repo_slugs', '')
+    if not len(repo_slugs):
+        repo_slugs = []
+    else:
+        repo_slugs = repo_slugs.split(',')
+    context['repo_slugs'] = repo_slugs
     hidden_repos = request.query.get('hidden_repos', '')
-    hidden_repos = hidden_repos.split(',')
+    if not len(hidden_repos):
+        hidden_repos = []
+    else:
+        hidden_repos = hidden_repos.split(',')
     context['hidden_repos'] = hidden_repos
     metric = request.query.get('data_metric', 'count')
     assert metric in ['count', 'uniques']
@@ -259,10 +267,11 @@ def create_app(*args):
         web.static('/static', STATIC_ROOT, name='static'),
     ])
     app.on_startup.append(create_dbstore)
-    aiohttp_jinja2.setup(
+    j_env = aiohttp_jinja2.setup(
         app,
         loader=jinja2.FileSystemLoader(os.path.join(BASE_PATH, 'templates'))
     )
+    templatetags.setup(j_env)
     return app
 
 def main():
