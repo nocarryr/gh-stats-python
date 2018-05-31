@@ -649,7 +649,7 @@ class TrafficPathEntry(ApiObject):
         if traffic_path.datetime is not None:
             obj_filt['datetime'] = traffic_path.datetime
         else:
-            obj_filt.update(build_datetime_filter('timestamp', **kwargs))
+            obj_filt.update(build_datetime_filter('datetime', **kwargs))
         async for doc in coll.find(obj_filt):
             ekwargs = {
                 'traffic_path':traffic_path,
