@@ -126,47 +126,58 @@ async def get_timeline_for_repo(app, context, repo, metric):
         yield doc
 
 
-async def get_traffic_chart_data(app, context):
-    repos = await get_repos(app, context)
-    hidden_repos = context['hidden_repos']
-    metric = context.get('data_metric', 'count')
-    limit = context.get('limit', 10)
+async def build_chart_datasets(app, context, metric, limit, hidden_repos):
     all_dts = {}
-    by_counts = {}
-    data = {'dataset_ids':[]}
-    chart_data = {'datasets':[]}
     color_iter = context.get('color_iter', iter_colors())
-    async for repo_doc in get_repos_by_rank(app, context, metric, limit):
+    dataset_ids = []
+
+    async def build_chart_repo_dataset(repo_doc):
         repo_slug = repo_doc['_id']
+        dataset_ids.append(repo_slug)
+        async def build_rows():
+            async for tl_doc in get_timeline_for_repo(app, context, repo_slug, metric):
+                dt = tl_doc['timestamp']
+                dt_str = all_dts.get(dt)
+                if dt_str is None:
+                    dt_str = utils.dt_to_str(dt)
+                    all_dts[dt] = dt_str
+                yield {'t':dt_str, 'y':tl_doc['value']}
+
         color = next(color_iter)
         tdata = {
             'label':'{} Total'.format(repo_slug),
             'fill':False,
-            'data':[],
             'backgroundColor':color,
             'borderColor':color,
             'lineTension':0,
             'spanGaps':True,
             'hidden':repo_slug in hidden_repos,
         }
-        data['dataset_ids'].append(repo_slug)
         if metric == 'count':
             tdata['label'] = '{} Total'.format(repo_slug)
         elif metric == 'uniques':
             tdata['label'] = '{} Uniques'.format(repo_slug)
-        async for tl_doc in get_timeline_for_repo(app, context, repo_slug, metric):
-            dt = tl_doc['timestamp']
-            dt_str = all_dts.get(dt)
-            if dt_str is None:
-                dt_str = utils.dt_to_str(dt)
-                all_dts[dt] = dt_str
-            tdata['data'].append({'t':dt_str, 'y':tl_doc['value']})
-        chart_data['datasets'].append(tdata)
+        tdata['data'] = [d async for d in build_rows()]
+        return tdata
+
+    repo_iter = get_repos_by_rank(app, context, metric, limit)
+    datasets = [await build_chart_repo_dataset(repo_doc) async for repo_doc in repo_iter]
     start_dt = min(all_dts.keys())
-    data['start_datetime'] = all_dts[start_dt]
-    data['chart_data'] = chart_data
+    data = {
+        'chart_data':{
+            'datasets':datasets,
+        },
+        'dataset_ids':dataset_ids,
+        'start_datetime':all_dts[start_dt],
+    }
     return data
 
+async def get_traffic_chart_data(app, context):
+    repos = await get_repos(app, context)
+    hidden_repos = context['hidden_repos']
+    metric = context.get('data_metric', 'count')
+    limit = context.get('limit', 10)
+    return await build_chart_datasets(app, context, metric, limit, hidden_repos)
 
 @aiohttp_jinja2.template('home.html')
 async def home(request):
