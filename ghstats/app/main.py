@@ -86,6 +86,25 @@ def update_context_dt_range(request, context=None):
         context['end_datetime_str'] = utils.dt_to_str(now)
     return context
 
+async def get_repo_traffic_paths(app, context, repo_slug):
+    db_store = app['db_store']
+    coll = db_store.get_collection(traffic.TrafficPathEntry._collection_name)
+    filt = traffic.build_datetime_filter('datetime', **context)
+    filt['repo_slug'] = repo_slug
+    pipeline = [
+        {'$match':filt},
+        {'$group':{
+            '_id':'$path',
+            'count':{'$sum':'$count'},
+            'uniques':{'$sum':'$uniques'},
+            'path':{'$first':'$path'},
+            'title':{'$first':'$title'},
+        }},
+        {'$sort':{'count':-1}},
+    ]
+    async for doc in coll.aggregate(pipeline):
+        yield doc
+
 async def get_repos_by_rank(app, context, metric='count', limit=10):
     repos = context['repos']
     repo_slugs = context.get('repo_slugs')
@@ -214,7 +233,10 @@ async def repo_detail(request):
         'chart_data_url':'/combined-data/',
     })
     repos = await get_repos(request.app, context)
-    context['repo'] = repos[repo_slug]
+    repo = repos[repo_slug]
+    context['repo'] = repo
+    tp = [doc async for doc in get_repo_traffic_paths(request.app, context, repo_slug)]
+    context['traffic_paths'] = tp
     return context
 
 async def prepare_chart_data_view_context(request):

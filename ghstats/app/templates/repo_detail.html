@@ -2,8 +2,33 @@
 
 {% block body %}
 <h1>{{ repo.repo_slug }}</h1>
-<div id="chart-container">
-    {% include "includes/chart.html" with context %}
+<div class="container">
+    <div class="row">
+        <div id="chart-container" class="column">
+            {% include "includes/chart.html" with context %}
+        </div>
+        <div class="column">
+            <table class="traffic-path-table">
+                <thead><tr>
+                    {% for header in ["Path", "Count", "Uniques"] %}
+                    <th>{{ header }}</th>
+                    {% endfor %}
+                </tr></thead>
+                <tbody>
+                {% for entry in traffic_paths %}
+                <tr>
+                    <td>
+                        <a href="{{ repo.get_gh_url() }}/{{ entry.path }}">{{ entry.path }}</a>
+                        <p>{{ entry.title }}</p>
+                    </td>
+                    <td>{{ entry.count }}</td>
+                    <td>{{ entry.uniques }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 {% endblock %}
 

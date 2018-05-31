@@ -195,6 +195,8 @@ class Repo(ApiObject):
     @property
     def repo_slug(self):
         return '{self.owner}/{self.name}'.format(self=self)
+    def get_gh_url(self, scheme='https'):
+        return '{}://github.com/{}'.format(scheme, self.repo_slug)
     def _get_api_path(self):
         return 'repos/{self.owner}/{self.name}'.format(self=self)
     def _cmp(self, other, op):

@@ -1,0 +1,32 @@
+.container{
+
+}
+.row{
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+}
+.column{
+    flex: auto;
+}
+
+.traffic-path-table{
+
+}
+
+.traffic-path-table th,td{
+    border-style: solid;
+    border-width: 1px;
+}
+
+.traffic-path-table th{
+
+}
+
+.traffic-path-table td{
+    font-size: .85em;
+}
+
+.traffic-path-table td p{
+    margin: 0;
+}
