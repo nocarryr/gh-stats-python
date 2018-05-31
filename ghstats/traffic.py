@@ -278,8 +278,11 @@ class Repo(ApiObject):
         obj = cls(**kwargs)
         kwargs['repo'] = obj
         if load_traffic:
-            obj.traffic_views = await RepoTrafficViews.from_db(**kwargs)
-            obj.traffic_paths = await RepoTrafficPaths.from_db(**kwargs)
+            fut = RepoTrafficViews.from_db(**kwargs)
+            obj.traffic_views = {dt:entry async for dt, entry in fut}
+
+            fut = RepoTrafficPaths.from_db(**kwargs)
+            obj.traffic_paths = {key:val async for key, val in fut}
         return obj
     async def traffic_views_from_db_flat(self, **kwargs):
         kwargs['repo'] = self
@@ -402,7 +405,6 @@ class RepoTrafficViews(ApiObject):
         filt = cls.get_db_lookup_filter(**kwargs)
         repo_slug = filt['repo_slug']
         coll = db_store.get_collection(cls._collection_name)
-        results = {}
         kwargs['_modified'] = False
         async for doc in coll.find(filt):
             okwargs = kwargs.copy()
@@ -410,8 +412,7 @@ class RepoTrafficViews(ApiObject):
             okwargs['datetime'] = utils.make_aware(okwargs['datetime'])
             obj = cls(**okwargs)
             await obj.get_timeline_from_db()
-            results[obj.datetime] = obj
-        return results
+            yield obj.datetime, obj
     @classmethod
     async def from_db_flat(cls, **kwargs):
         kwargs['_modified'] = False
@@ -426,7 +427,8 @@ class RepoTrafficViews(ApiObject):
     async def get_timeline_from_db(self, **kwargs):
         kwargs['traffic_view'] = self
         kwargs['db_store'] = self.db_store
-        self.timeline = await TrafficTimelineEntry.from_db(**kwargs)
+        fut = TrafficTimelineEntry.from_db(**kwargs)
+        self.timeline = [entry async for entry in fut]
 
 class TrafficTimelineEntry(ApiObject):
     _serialize_attrs = ['count', 'uniques', 'timestamp']
@@ -498,7 +500,6 @@ class TrafficTimelineEntry(ApiObject):
         else:
             tl_filt.update(build_datetime_filter('timestamp', **kwargs))
 
-        results = []
         async for tl_doc in tl_coll.find(tl_filt, sort=[('timestamp', pymongo.ASCENDING)]):
             tl_doc['timestamp'] = utils.make_aware(tl_doc['timestamp'])
             tlkwargs = {
@@ -507,8 +508,7 @@ class TrafficTimelineEntry(ApiObject):
                 '_modified':False,
             }
             tlkwargs.update(tl_doc)
-            results.append(cls(**tlkwargs))
-        return results
+            yield cls(**tlkwargs)
     def __str__(self):
         return '{self.timestamp} - {self.count}'.format(self=self)
 
@@ -574,7 +574,6 @@ class RepoTrafficPaths(ApiObject):
         db_store = kwargs.get('db_store')
         kwargs['_modified'] = False
         coll = db_store.get_collection(cls._collection_name)
-        results = {}
         keys = await coll.distinct('datetime', filt)
         for key in keys:
             key = utils.make_aware(key)
@@ -582,8 +581,7 @@ class RepoTrafficPaths(ApiObject):
             okwargs['datetime'] = key
             obj = cls(**okwargs)
             await obj.get_data_from_db()
-            results[key] = obj
-        return results
+            yield key, obj
     @classmethod
     async def from_db_flat(cls, **kwargs):
         kwargs['_modified'] = False
@@ -593,7 +591,8 @@ class RepoTrafficPaths(ApiObject):
     async def get_data_from_db(self, **kwargs):
         kwargs['traffic_path'] = self
         kwargs['db_store'] = self.db_store
-        self.data = await TrafficPathEntry.from_db(**kwargs)
+        fut = TrafficPathEntry.from_db(**kwargs)
+        self.data = [entry async for entry in fut]
 
 class TrafficPathEntry(ApiObject):
     _serialize_attrs = ['path', 'count', 'uniques', 'title']
@@ -651,7 +650,6 @@ class TrafficPathEntry(ApiObject):
             obj_filt['datetime'] = traffic_path.datetime
         else:
             obj_filt.update(build_datetime_filter('timestamp', **kwargs))
-        results = []
         async for doc in coll.find(obj_filt):
             ekwargs = {
                 'traffic_path':traffic_path,
@@ -659,8 +657,7 @@ class TrafficPathEntry(ApiObject):
                 '_modified':False,
             }
             ekwargs.update(doc)
-            results.append(cls(**ekwargs))
-        return results
+            yield cls(**ekwargs)
     def __str__(self):
         return self.path
 
