@@ -25,7 +25,11 @@ def parse_query_dt(o):
         if o.isalnum():
             o = float(o)
         else:
-            return utils.parse_dt(o)
+            if o.count(':') == 1:
+                dt_fmt = '%Y-%m-%dT%H:%MZ'
+            else:
+                dt_fmt = utils.DT_FMT
+            return utils.parse_dt(o, dt_fmt)
     if isinstance(o, numbers.Number):
         return utils.timestamp_to_dt(o)
     raise ValueError('Could not parse datetime from {}'.format(repr(o)))

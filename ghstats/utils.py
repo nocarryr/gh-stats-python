@@ -24,8 +24,8 @@ def timestamp_to_dt(ts):
 def make_aware(dt, tz=UTC):
     return tz.localize(dt)
 
-def parse_dt(s):
-    dt = datetime.datetime.strptime(s, DT_FMT)
+def parse_dt(s, dt_fmt=DT_FMT):
+    dt = datetime.datetime.strptime(s, dt_fmt)
     dt = UTC.localize(dt)
     return dt
 
