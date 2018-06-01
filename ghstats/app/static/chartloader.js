@@ -70,8 +70,9 @@ $(function(){
         updateDtPicker($el, dt);
     });
 
-    function loadChart($chart){
-        var $form = $("form[data-chart-id=I]".replace('I', $chart.attr('id')));
+    function loadChart($chartContainer){
+        var $chart = $(".chart", $chartContainer),
+            $form = $("form.chart-form", $chartContainer);
         $chart.data('form', $form);
         getFormHiddenRepos($chart);
         $form.on("submit", function(e){
@@ -185,13 +186,14 @@ $(function(){
     }
 
     $(".chart").each(function(){
-        var $chart = $(this);
-        loadChart($chart);
+        var $chart = $(this),
+            $chartContainer = $chart.parents(".chart-container");
+        loadChart($chartContainer);
     });
     $(".metric-select button").click(function(){
         var $btn = $(this),
-            chartId = $btn.parents(".metric-select").data('chartId'),
-            $form = $("form[data-chart-id=I]".replace('I', chartId)),
+            $chartContainer = $btn.parents(".chart-container"),
+            $form = $("form.chart-form", $chartContainer),
             $el = $("input[name=data_metric]", $form);
         if ($el.val() == $btn.data('metric')){
             return;
