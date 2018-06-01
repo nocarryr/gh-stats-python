@@ -42,6 +42,25 @@ $(function(){
         $chart.data('hiddenRepos', hiddenRepos);
     }
 
+    function checkChartCollides(evt, $chart){
+        var ci = $chart.data('chart'),
+            mouseXY = Chart.helpers.getRelativePosition(evt, ci),
+            chartBounds = ci.chartArea;
+        if (mouseXY.x < chartBounds.left){
+            return false;
+        }
+        if (mouseXY.x > chartBounds.right){
+            return false;
+        }
+        if (mouseXY.y < chartBounds.top){
+            return false;
+        }
+        if (mouseXY.y > chartBounds.bottom){
+            return false;
+        }
+        return true;
+    }
+
     $("input[type=datetime-local]").each(function(){
         var $el = $(this),
             dt = new Date($el.data('value'));
@@ -81,6 +100,9 @@ $(function(){
                         onClick:function(e, elems){
                             var hoverTarget = $chart.data('hoverTarget');
                             if (hoverTarget === null){
+                                return;
+                            }
+                            if (!checkChartCollides(e, $chart)){
                                 return;
                             }
                             $chart.trigger('repoClicked', [hoverTarget]);
