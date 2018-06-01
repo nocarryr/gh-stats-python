@@ -91,9 +91,7 @@ def update_context_dt_range(request, context=None):
         context['end_datetime_str'] = utils.dt_to_str(now)
     return context
 
-
-@aiohttp_jinja2.template('home.html')
-async def home(request):
+async def prepare_view_context(request):
     context = update_context_dt_range(request)
     repos = await get_repos(request.app, context)
     context.update({
@@ -104,6 +102,13 @@ async def home(request):
         'data_metric':'count',
         'limit':10,
         'hidden_repos':[],
+    })
+    return context
+
+@aiohttp_jinja2.template('home.html')
+async def home(request):
+    context = await prepare_view_context(request)
+    context.update({
         'chart_id':'timeline-chart',
         'chart_data_url':'/traffic-data/',
     })
@@ -113,20 +118,14 @@ async def home(request):
 async def repo_detail(request):
     repo_slug = request.match_info['repo_slug']
     repo_slug = urllib.parse.unquote_plus(repo_slug)
-    context = update_context_dt_range(request)
+    context = await prepare_view_context(request)
     context.update({
-        'request':request,
         'repo_slug':repo_slug,
         'repo_slugs':[repo_slug],
-        'DT_FMT':utils.DT_FMT,
-        'data_metric':'count',
-        'limit':10,
-        'hidden_repos':[],
         'chart_id':'timeline-chart',
         'chart_data_url':'/combined-data/',
     })
-    repos = await get_repos(request.app, context)
-    repo = repos[repo_slug]
+    repo = context['repos'][repo_slug]
     context['repo'] = repo
     tp = [doc async for doc in chartdata.get_repo_traffic_paths(request.app, context, repo_slug)]
     context['traffic_paths'] = tp
