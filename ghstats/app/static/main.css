@@ -30,3 +30,37 @@
 .traffic-path-table td p{
     margin: 0;
 }
+
+.chart-container{
+
+}
+
+.chart-form{
+    display: flex;
+    flex-direction: row;
+    flex-flow: row wrap;
+    max-width: 80vw;
+    padding-top: 1em;
+    padding-bottom: 1em;
+}
+
+.chart-form .form-control{
+    flex-shrink: 1;
+    flex-grow: .05;
+}
+
+.form-control label{
+    display: block;
+}
+
+.form-control input{
+    min-height: 1.5rem;
+    padding: 0;
+    margin: 0;
+}
+
+.form-submit{
+    flex-shrink: 1;
+    flex-grow: .05;
+    margin-top: auto;
+}
