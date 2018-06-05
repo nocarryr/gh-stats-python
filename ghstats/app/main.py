@@ -129,6 +129,8 @@ async def repo_detail(request):
     context['repo'] = repo
     tp = [doc async for doc in chartdata.get_repo_traffic_paths(request.app, context, repo_slug)]
     context['traffic_paths'] = tp
+    tr = [doc async for doc in chartdata.get_repo_referrals(request.app, context, repo_slug)]
+    context['traffic_referrers'] = tr
     return context
 
 async def prepare_chart_data_view_context(request):

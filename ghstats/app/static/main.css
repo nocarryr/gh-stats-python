@@ -10,24 +10,24 @@
     flex: auto;
 }
 
-.traffic-path-table{
+.detail-table{
 
 }
 
-.traffic-path-table th,td{
+.detail-table th,td{
     border-style: solid;
     border-width: 1px;
 }
 
-.traffic-path-table th{
+.detail-table th{
 
 }
 
-.traffic-path-table td{
+.detail-table td{
     font-size: .85em;
 }
 
-.traffic-path-table td p{
+.detail-table td p{
     margin: 0;
 }
 

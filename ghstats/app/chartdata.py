@@ -21,6 +21,24 @@ async def get_repo_traffic_paths(app, context, repo_slug):
     async for doc in coll.aggregate(pipeline):
         yield doc
 
+async def get_repo_referrals(app, context, repo_slug):
+    db_store = app['db_store']
+    coll = db_store.get_collection(traffic.TrafficReferrer._collection_name)
+    filt = traffic.build_datetime_filter('start_datetime', **context)
+    filt['repo_slug'] = repo_slug
+    pipeline = [
+        {'$match':filt},
+        {'$group':{
+            '_id':'$referrer',
+            'referrer':{'$first':'$referrer'},
+            'count':{'$sum':'$count'},
+            'uniques':{'$sum':'$uniques'},
+        }},
+        {'$sort':{'count':-1}},
+    ]
+    async for doc in coll.aggregate(pipeline):
+        yield doc
+
 async def get_repos_by_rank(app, context, metric='count', limit=10):
     repos = context['repos']
     repo_slugs = context.get('repo_slugs')

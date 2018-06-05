@@ -8,7 +8,25 @@
             {% include "includes/chart.html" with context %}
         </div>
         <div class="column">
-            <table class="traffic-path-table">
+            <table class="detail-table">
+                <thead><tr>
+                {% for header in ["Referrer", "Count", "Uniques"] %}
+                    <th>{{ header }}</th>
+                {% endfor %}
+                </tr></thead>
+                <tbody>
+                {% for entry in traffic_referrers %}
+                    <tr>
+                    {% for key in ["referrer", "count", "uniques"] %}
+                        <td>{{ entry[key] }}</td>
+                    {% endfor %}
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="column">
+            <table class="detail-table">
                 <thead><tr>
                     {% for header in ["Path", "Count", "Uniques"] %}
                     <th>{{ header }}</th>
