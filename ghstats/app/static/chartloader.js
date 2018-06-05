@@ -119,6 +119,7 @@ $(function(){
                             $chart.data('hoverTarget', itemKey);
                         },
                         responsive:true,
+                        maintainAspectRatio:false,
                         title:{
                             display:false,
                             text:'',
@@ -165,6 +166,7 @@ $(function(){
                 };
                 chart = new Chart(ctx, chartOpts);
                 $chart.data('chart', chart);
+                $chart.trigger('dataLoaded');
                 $chart.on('repoHidden', function(e, repoSlug, hidden){
                     var hiddenRepos = $chart.data('hiddenRepos'),
                         $el = $("input[name=hidden_repos]", $form),
@@ -187,7 +189,23 @@ $(function(){
 
     $(".chart").each(function(){
         var $chart = $(this),
-            $chartContainer = $chart.parents(".chart-container");
+            $chartContainer = $chart.parents(".chart-container"),
+            $wrapper = $(".chart-wrapper", $chartContainer);
+        var resizeChart = function(){
+            var ci = $chart.data('chart'),
+                w = $wrapper.width(),
+                h = $wrapper.height();
+            console.log('onResize: ', w, h, ci);
+            if (typeof(ci) == 'undefined' || ci === null){
+                return;
+            }
+            $chart.width(w).height(h);
+            $chart[0].style.width = w;
+            $chart[0].style.height = h;
+            ci.resize();
+        };
+        $chartContainer.resize(resizeChart).trigger('resize');
+        $chart.on('dataLoaded', resizeChart);
         loadChart($chartContainer);
     });
     $(".metric-select button").click(function(){

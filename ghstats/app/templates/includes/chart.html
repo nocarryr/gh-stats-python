@@ -26,11 +26,13 @@
         <input type="hidden" name="repo_slugs" value="{{ repo_slugs|list_to_str }}">
         <input class="form-submit" type="submit" value="Update">
     </form>
-    <canvas id="{{ chart_id }}"
-            class="chart"
-            data-from-url="{{ chart_data_url }}"
-            data-dt-format="{{ DT_FMT }}"
-            data-metric="{{ data_metric }}"></canvas>
+    <div class="chart-wrapper{% if chart_css_classes %} {{ chart_css_classes }}{% endif %}">
+        <canvas id="{{ chart_id }}"
+                class="chart"
+                data-from-url="{{ chart_data_url }}"
+                data-dt-format="{{ DT_FMT }}"
+                data-metric="{{ data_metric }}"></canvas>
+    </div>
     <div class="metric-select" data-chart-id="{{ chart_id }}">
         <button data-metric="count">Count</button>
         <button data-metric="uniques">Uniques</button>

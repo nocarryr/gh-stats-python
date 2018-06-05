@@ -4,9 +4,13 @@
 <h1>{{ repo.repo_slug }}</h1>
 <div class="container">
     <div class="row">
-        <div id="chart-container" class="column">
+        <div class="column detail-chart-container">
+            {% with chart_css_classes="detail-chart" %}
             {% include "includes/chart.html" with context %}
+            {% endwith %}
         </div>
+    </div>
+    <div class="row">
         <div class="column">
             <table class="detail-table">
                 <thead><tr>
