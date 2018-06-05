@@ -114,7 +114,11 @@ class ApiObject(object):
         coll = db_store.get_collection(cls._log_collection_name)
         await coll.create_index('log_timestamp')
         logger.info('{} indexes created'.format(cls))
-        for _cls in [Repo, RepoTrafficViews, TrafficTimelineEntry, TrafficPathEntry]:
+        classes = [
+            Repo, RepoTrafficViews, TrafficTimelineEntry, TrafficPathEntry,
+            RepoTrafficReferrals, TrafficReferrer,
+        ]
+        for _cls in classes:
             logger.info('creating indexes for {}...'.format(_cls))
             await _cls.create_indexes(db_store)
             logger.info('{} indexes created'.format(_cls))
@@ -192,6 +196,7 @@ class Repo(ApiObject):
         self.name = kwargs.get('name')
         self.traffic_views = None
         self.traffic_paths = None
+        self.traffic_referrals = None
     @property
     def repo_slug(self):
         return '{self.owner}/{self.name}'.format(self=self)
@@ -232,6 +237,7 @@ class Repo(ApiObject):
         tasks = [
             asyncio.ensure_future(self.get_traffic_views(now=now)),
             asyncio.ensure_future(self.get_traffic_paths(now=now)),
+            asyncio.ensure_future(self.get_traffic_referrals(now=now)),
         ]
         await asyncio.wait(tasks)
     async def get_traffic_views(self, per='day', now=None):
@@ -254,6 +260,16 @@ class Repo(ApiObject):
         self.traffic_paths = tp
         await tp.get_data()
         return tp
+    async def get_traffic_referrals(self, now=None):
+        if now is None:
+            now = utils.now()
+        tkwargs = {'repo':self, 'db_store':self.db_store}
+        tr = await RepoTrafficReferrals.find_last_item(**tkwargs)
+        if tr is None:
+            tr = RepoTrafficReferrals(**tkwargs)
+        self.traffic_referrals = tr
+        await tr.get_data()
+        return tr
     async def store_to_db(self, log_timestamp):
         coll_name = self._collection_name
         db_store = self.db_store
@@ -268,6 +284,7 @@ class Repo(ApiObject):
         tasks = [
             asyncio.ensure_future(self.traffic_views.store_to_db(log_timestamp)),
             asyncio.ensure_future(self.traffic_paths.store_to_db(log_timestamp)),
+            asyncio.ensure_future(self.traffic_referrals.store_to_db(log_timestamp)),
         ]
         await asyncio.wait(tasks)
     @classmethod
@@ -660,6 +677,176 @@ class TrafficPathEntry(ApiObject):
             yield cls(**ekwargs)
     def __str__(self):
         return self.path
+
+class RepoTrafficReferrals(ApiObject):
+    _collection_name = 'traffic_referrals'
+    _serialize_attrs = ['start_datetime', 'end_datetime', 'is_complete', 'referrers']
+    def __init__(self, **kwargs):
+        self._repo_slug = kwargs.get('repo_slug')
+        self.repo = kwargs.get('repo')
+        kwargs.setdefault('db_store', self.repo.db_store)
+        kwargs['request_handler'] = self.repo.request_handler
+        super().__init__(**kwargs)
+        start_dt = utils.now()
+        end_dt = start_dt + datetime.timedelta(seconds=1)
+        self.start_datetime = kwargs.get('start_datetime', start_dt)
+        self.end_datetime = kwargs.get('end_datetime', end_dt)
+        self.is_complete = kwargs.get('is_complete', False)
+        self.referrers = kwargs.get('referrers', {})
+    @property
+    def repo_slug(self):
+        s = self._repo_slug
+        if s is None:
+            s = self._repo_slug = self.repo.repo_slug
+        return s
+    @repo_slug.setter
+    def repo_slug(self, value):
+        self._repo_slug = value
+    def _get_api_path(self):
+        return '{self.repo.api_path}/traffic/popular/referrers'.format(self=self)
+    @classmethod
+    async def create_indexes(cls, db_store):
+        coll = db_store.get_collection(cls._collection_name)
+        await coll.create_indexes([
+            pymongo.IndexModel(
+                [
+                    ('repo_slug', pymongo.ASCENDING),
+                    ('start_datetime', pymongo.ASCENDING),
+                ],
+                unique=True,
+            ),
+        ])
+    @classmethod
+    def get_db_lookup_filter(cls, **kwargs):
+        repo = kwargs.get('repo')
+        repo_slug = kwargs.get('repo_slug')
+        if repo_slug is None:
+            repo_slug = repo.repo_slug
+        filt = {'repo_slug':repo_slug}
+        start_dt = kwargs.get('start_datetime')
+        end_dt = kwargs.get('end_datetime')
+        if start_dt is not None:
+            filt['start_datetime'] = start_dt
+        if end_dt is not None:
+            filt['end_datetime'] = end_dt
+        if is_complete in kwargs:
+            filt['is_complete'] = kwargs['is_complete']
+        return filt
+    @classmethod
+    async def find_last_item(cls, **kwargs):
+        db_store = kwargs.get('db_store')
+        coll = db_store.get_collection(cls._collection_name)
+        repo_slug = kwargs.get('repo_slug')
+        if repo_slug is None:
+            repo = kwargs.get('repo')
+            repo_slug = repo.repo_slug
+        filt = {'repo_slug':repo_slug}
+        dts = await coll.distinct('start_datetime', filt)
+        if not len(dts):
+            return cls(**kwargs)
+        filt['start_datetime'] = max(dts)
+        doc = await coll.find_one(filt)
+        kwargs.update(doc)
+        return cls(**kwargs)
+    async def find_previous(self):
+        coll = self.db_store.get_collection(self._collection_name)
+        filt = {
+            'repo_slug':self.repo_slug,
+            'end_datetime':{'$lte':self.start_datetime},
+        }
+        dts = await coll.distinct('start_datetime', filt)
+        if not len(dts):
+            return None
+        filt['start_datetime'] = max(dts)
+        return await coll.find_one(filt)
+    async def get_data(self):
+        coll_name = self._collection_name
+        resp_data = await self.make_request('get')
+        if self._cached:
+            self.end_datetime = utils.now()
+        else:
+            prev = self.find_previous
+            if prev is not None:
+                self.start_datetime = utils.now()
+                self.end_datetime = self.start_datetime + datetime.timedelta(seconds=1)
+                prev['end_datetime'] = self.start_datetime
+                prev['is_complete'] = True
+                await self.db_store.update_doc(coll_name, {'_id':prev['_id']}, prev)
+            self.referrers = {}
+        for d in resp_data:
+            key = d['referrer']
+            r = self.referrers.get(key)
+            if r is not None:
+                exists = True
+                r.count = d['count']
+                r.uniques = d['uniques']
+            else:
+                exists = False
+                rkwargs = {'traffic_referrals':self}
+                rkwargs.update(d)
+                r = TrafficReferrer(**rkwargs)
+                self.referrers[key] = r
+    async def store_to_db(self, log_timestamp):
+        coll_name = self._collection_name
+        db_store = self.db_store
+        filt = {
+            'repo_slug':self.repo_slug,
+            'start_datetime':self.start_datetime,
+        }
+        attrs = [a for a in self._serialize_attrs if a not in 'referrers']
+        doc = self._serialize(attrs)
+        doc['repo_slug'] = self.repo_slug
+        updated, _ = await db_store.update_doc(coll_name, filt, doc)
+        if updated:
+            await self.log_db_update(log_timestamp, coll_name, 1)
+        tasks = []
+        for r in self.referrers.values():
+            tasks.append(asyncio.ensure_future(r.store_to_db(log_timestamp)))
+        if len(tasks):
+            await asyncio.wait(tasks)
+
+class TrafficReferrer(ApiObject):
+    _collection_name = 'traffic_referrers'
+    _serialize_attrs = ['referrer', 'count', 'uniques']
+    def __init__(self, **kwargs):
+        self.traffic_referrals = kwargs.get('traffic_referrals')
+        kwargs.setdefault('_modified', self.traffic_referrals._modified)
+        kwargs.setdefault('db_store', self.traffic_referrals.db_store)
+        super().__init__(**kwargs)
+        self.referrer = kwargs.get('referrer')
+        self.count = kwargs.get('count')
+        self.uniques = kwargs.get('uniques')
+    @property
+    def repo_slug(self):
+        return self.traffic_referrals.repo_slug
+    def _get_api_path(self):
+        return self.traffic_referrals.api_path
+    @classmethod
+    async def create_indexes(cls, db_store):
+        coll = db_store.get_collection(cls._collection_name)
+        await coll.create_indexes([
+            pymongo.IndexModel(
+                [
+                    ('repo_slug', pymongo.ASCENDING),
+                    ('start_datetime', pymongo.ASCENDING),
+                    ('referrer', pymongo.ASCENDING),
+                ],
+                unique=True,
+            ),
+        ])
+    async def store_to_db(self, log_timestamp):
+        coll_name = self._collection_name
+        db_store = self.db_store
+
+        filt = {
+            'repo_slug':self.repo_slug,
+            'start_datetime':self.traffic_referrals.start_datetime,
+        }
+        doc = filt.copy()
+        doc.update(self._serialize())
+        updated, _ = await db_store.update_doc(coll_name, filt, doc)
+        if updated:
+            await self.log_db_update(log_timestamp, coll_name, 1)
 
 @jsonfactory.encoder
 def json_encode(o):
