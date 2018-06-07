@@ -841,6 +841,7 @@ class TrafficReferrer(ApiObject):
         filt = {
             'repo_slug':self.repo_slug,
             'start_datetime':self.traffic_referrals.start_datetime,
+            'referrer':self.referrer,
         }
         doc = filt.copy()
         doc.update(self._serialize())
