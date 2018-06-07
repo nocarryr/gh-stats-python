@@ -765,7 +765,7 @@ class RepoTrafficReferrals(ApiObject):
         if self._cached:
             self.end_datetime = utils.now()
         else:
-            prev = self.find_previous
+            prev = await self.find_previous()
             if prev is not None:
                 self.start_datetime = utils.now()
                 self.end_datetime = self.start_datetime + datetime.timedelta(seconds=1)
